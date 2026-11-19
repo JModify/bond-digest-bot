@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Format SharePoint news digests with a saved preset and download a new email.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="theme-color" content="#F4F7FB">
+  <title>Digest Bot · Service Desk Central</title>
+  <link rel="icon" href="mark.png" type="image/png">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="wordmark" href="#workspace" aria-label="Digest Bot workspace">
+        <span class="brand-mark"><i class="icon icon-mail" aria-hidden="true"></i></span>
+        <span class="wordmark-text"><strong>Digest Bot</strong><span>Service Desk Central</span></span>
+      </a>
+      <nav class="main-nav" aria-label="Digest Bot">
+        <a href="#workspace" data-tab="workspace" aria-current="page"><i class="icon icon-grid" aria-hidden="true"></i>Workspace</a>
+        <a href="#editor" data-tab="editor"><i class="icon icon-edit" aria-hidden="true"></i>Digest editor</a>
+      </nav>
+      <span class="version">v1.0.0</span>
+    </div>
+  </header>
+
+  <main class="shell" id="main" tabindex="-1">
+    <section id="workspace-view" aria-labelledby="workspace-title">
+      <div class="hero">
+        <div class="hero-copy">
+          <p class="hero-context"><i class="icon icon-mail" aria-hidden="true"></i> SharePoint news digest</p>
+          <h1 id="workspace-title">Format a <span>news digest</span></h1>
+          <p>Give a SharePoint news email your own layout and download it as a ready-to-open .eml file.</p>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="art-ring art-ring-one"></div>
+          <div class="art-ring art-ring-two"></div>
+          <div class="art-paper art-paper-back"></div>
+          <div class="art-paper art-paper-front">
+            <div class="art-heading"><b></b><b></b><b></b></div>
+            <div class="art-story"><span></span><div><b></b><b></b><b></b></div></div>
+            <div class="art-story"><span></span><div><b></b><b></b><b></b></div></div>
+          </div>
+          <div class="art-envelope"><i class="icon icon-mail"></i></div>
+          <b class="art-star art-star-one"></b>
+          <b class="art-star art-star-two"></b>
+        </div>
+      </div>
+
+      <div class="work-grid">
+        <div class="work-controls">
+          <section class="panel upload-panel" aria-labelledby="upload-title">
+            <div class="panel-heading">
+              <span class="heading-icon"><i class="icon icon-upload" aria-hidden="true"></i></span>
+              <div>
+                <h2 id="upload-title">Source email</h2>
+                <p>Use the .eml saved from your SharePoint digest.</p>
+              </div>
+            </div>
+            <div class="drop-zone" id="drop-zone">
+              <input type="file" accept=".eml,message/rfc822" id="file-input" hidden>
+              <div id="drop-empty">
+                <p class="drop-title">Drag and drop your .eml here</p>
+                <button type="button" class="button button-secondary" id="choose-file"><i class="icon icon-folder" aria-hidden="true"></i> Choose file</button>
+              </div>
+              <div class="file-detail" id="file-detail" hidden>
+                <span class="file-detail-icon"><i class="icon icon-mail" aria-hidden="true"></i></span>
+                <div class="file-detail-text">
+                  <p class="drop-title" id="file-name"></p>
+                  <p class="muted" id="file-meta"></p>
+                </div>
+                <div class="file-actions">
+                  <button type="button" class="button button-quiet" id="replace-file">Replace</button>
+                  <button type="button" class="button button-quiet icon-button" aria-label="Remove source email" title="Remove source email" id="remove-file"><i class="icon icon-close" aria-hidden="true"></i></button>
+                </div>
+              </div>
+            </div>
+            <p class="error" id="file-error" role="alert" hidden></p>
+            <p class="file-loading muted" id="file-loading" role="status" hidden>Reading email…</p>
+          </section>
+
+          <section class="panel preset-panel" aria-labelledby="preset-title">
+            <div class="panel-heading">
+              <span class="heading-icon"><i class="icon icon-edit" aria-hidden="true"></i></span>
+              <div>
+                <h2 id="preset-title">Formatting preset</h2>
+                <p id="preset-detail">Default preset · Feature rows</p>
+              </div>
+            </div>
+            <a class="button button-secondary" href="#editor">Edit preset</a>
+          </section>
+
+          <section class="panel output-panel" aria-labelledby="output-title">
+            <div class="panel-heading">
+              <span class="heading-icon"><i class="icon icon-download" aria-hidden="true"></i></span>
+              <div>
+                <h2 id="output-title">Formatted email</h2>
+                <p id="download-detail">Add a source email to enable download.</p>
+              </div>
+            </div>
+            <button class="button button-primary download-button" type="button" id="download" disabled><i class="icon icon-download" aria-hidden="true"></i> Download .eml</button>
+          </section>
+          <p class="privacy-note"><i class="icon icon-lock" aria-hidden="true"></i> Your email is processed on this device.</p>
+        </div>
+
+        <div id="workspace-preview" class="preview-slot">
+          <section class="panel preview-panel" id="preview-panel" aria-labelledby="preview-title">
+            <div class="preview-heading">
+              <div class="panel-heading">
+                <span class="heading-icon"><i class="icon icon-mail" aria-hidden="true"></i></span>
+                <div>
+                  <h2 id="preview-title">Digest preview</h2>
+                  <p id="preview-caption">Previewing the saved preset</p>
+                </div>
+              </div>
+              <span class="source-label" id="preview-source">Sample email</span>
+            </div>
+            <div class="email-pane">
+              <dl class="email-meta">
+                <div><dt>Subject</dt><dd id="preview-subject">Service Desk news</dd></div>
+                <div id="preview-recipient-row" hidden><dt>To</dt><dd id="preview-recipient"></dd></div>
+              </dl>
+              <iframe id="email-preview" sandbox="" title="Formatted email preview" referrerpolicy="no-referrer"></iframe>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section id="editor-view" aria-labelledby="editor-title" hidden>
+      <div class="editor-intro">
+        <div>
+          <h1 id="editor-title">Digest editor</h1>
+          <p>Save a preset to apply this design each time you upload a digest.</p>
+        </div>
+        <a class="button button-secondary" href="#workspace">Back to workspace</a>
+      </div>
+      <div class="editor-grid">
+        <form class="panel editor-panel" id="editor-form">
+          <fieldset class="editor-section">
+            <legend>Layout</legend>
+            <div class="layout-options">
+              <label class="layout-option">
+                <input type="radio" name="layout" value="rows" checked>
+                <span class="layout-figure figure-rows" aria-hidden="true"><i></i><i></i></span>
+                <span>Feature rows</span>
+              </label>
+              <label class="layout-option">
+                <input type="radio" name="layout" value="cards">
+                <span class="layout-figure figure-cards" aria-hidden="true"><i></i><i></i></span>
+                <span>Stacked cards</span>
+              </label>
+              <label class="layout-option">
+                <input type="radio" name="layout" value="compact">
+                <span class="layout-figure figure-compact" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>Compact list</span>
+              </label>
+            </div>
+            <label class="field font-field">Typeface
+              <select name="font">
+                <option value="sans">Sans serif</option>
+                <option value="serif">Serif</option>
+              </select>
+            </label>
+          </fieldset>
+
+          <fieldset class="editor-section">
+            <legend>Colours</legend>
+            <div class="palette-options" aria-label="Colour palettes">
+              <button type="button" class="palette palette-cobalt" data-palette="cobalt" aria-pressed="true" title="Cobalt" aria-label="Cobalt colour palette"></button>
+              <button type="button" class="palette palette-ocean" data-palette="ocean" aria-pressed="false" title="Ocean" aria-label="Ocean colour palette"></button>
+              <button type="button" class="palette palette-forest" data-palette="forest" aria-pressed="false" title="Forest" aria-label="Forest colour palette"></button>
+              <button type="button" class="palette palette-plum" data-palette="plum" aria-pressed="false" title="Plum" aria-label="Plum colour palette"></button>
+            </div>
+            <div class="colour-fields">
+              <label class="field">Header <span class="colour-control"><input type="color" name="headerColor" value="#153657"><span data-colour="headerColor">#153657</span></span></label>
+              <label class="field">Accent <span class="colour-control"><input type="color" name="accentColor" value="#2866A6"><span data-colour="accentColor">#2866A6</span></span></label>
+              <label class="field">Background <span class="colour-control"><input type="color" name="backgroundColor" value="#EEF3F8"><span data-colour="backgroundColor">#EEF3F8</span></span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="editor-section">
+            <legend>Email text</legend>
+            <div class="field-list">
+              <label class="field">Subject line<input type="text" name="subject" placeholder="Use the SharePoint subject"></label>
+              <label class="field">Digest title<input type="text" name="title" placeholder="Use the SharePoint digest title"></label>
+              <label class="field">Label above the title<input type="text" name="label" value="NEWS DIGEST"></label>
+              <label class="field">Article link text<input type="text" name="linkLabel" value="Read article"></label>
+              <label class="field field-wide">Introduction<textarea name="intro" rows="3" placeholder="Add a message above the articles"></textarea></label>
+              <label class="switch-field field-wide"><input type="checkbox" name="showOriginalIntro"><span class="switch" aria-hidden="true"></span><span>Use the SharePoint introduction if this field is blank</span></label>
+              <label class="field field-wide">Custom footer<textarea name="footer" rows="2" placeholder="Add a sign-off below the articles"></textarea></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="editor-section">
+            <legend>Content to include</legend>
+            <div class="switch-group">
+              <label class="switch-field"><input type="checkbox" name="showImages" checked><span class="switch" aria-hidden="true"></span>Article images</label>
+              <label class="switch-field"><input type="checkbox" name="showSummary" checked><span class="switch" aria-hidden="true"></span>Summaries</label>
+              <label class="switch-field"><input type="checkbox" name="showAuthor" checked><span class="switch" aria-hidden="true"></span>Author names</label>
+              <label class="switch-field"><input type="checkbox" name="showDate" checked><span class="switch" aria-hidden="true"></span>Published dates</label>
+              <label class="switch-field"><input type="checkbox" name="showViews"><span class="switch" aria-hidden="true"></span>View counts</label>
+              <label class="switch-field"><input type="checkbox" name="showSiteLink" checked><span class="switch" aria-hidden="true"></span>SharePoint site link</label>
+              <label class="switch-field"><input type="checkbox" name="showNotice" checked><span class="switch" aria-hidden="true"></span>Original footer notice</label>
+            </div>
+          </fieldset>
+
+          <fieldset class="editor-section">
+            <legend>Recipient</legend>
+            <label class="field">To address <span class="optional">Optional</span>
+              <input type="email" name="recipient" placeholder="name@example.com" aria-describedby="recipient-help" autocomplete="email" maxlength="254">
+            </label>
+            <p class="field-help" id="recipient-help">Prefills the To field in the downloaded email.</p>
+          </fieldset>
+
+          <div class="editor-actions">
+            <button type="button" class="button button-quiet" id="reset-preset">Reset to defaults</button>
+            <div class="save-actions">
+              <span id="draft-status" class="draft-status"></span>
+              <button type="submit" class="button button-primary">Save preset</button>
+            </div>
+          </div>
+        </form>
+        <div id="editor-preview" class="preview-slot"></div>
+      </div>
+    </section>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
