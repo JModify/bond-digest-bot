@@ -3,7 +3,7 @@ import { normaliseContentId } from "./mime.js";
 const datePattern = /^(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}|\d{1,2}\s+[\p{L}.]+\s+\d{4}|[\p{L}.]+\s+\d{1,2},?\s+\d{4})(?:,?\s+\d{1,2}:\d{2}.*)?$/u;
 const viewPattern = /^[\d.,\s]+\s+views?$/i;
 const bylinePattern = /(?:author|byline)/i;
-const siteLinkPattern = /^(?:go to (?:the )?site|view (?:the )?site|visit (?:the )?site)$/i;
+const siteLinkPattern = /^(?:go to (?:the )?site|view (?:the )?site|visit (?:the )?site|view all news and upcoming events)$/i;
 
 function textOf(element) {
   return (element?.textContent || "").replace(/\s+/g, " ").trim();

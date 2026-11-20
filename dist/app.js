@@ -1,29 +1,23 @@
 import { formatDigest, readDigest } from "./core/digest.js";
-import { DEFAULT_PRESET, LAYOUTS, PALETTES, normalisePreset, validRecipient } from "./core/preset.js";
+import { DEFAULT_PRESET, normalisePreset, validRecipient } from "./core/preset.js";
 import { renderDigest } from "./core/render.js";
 
 const STORAGE_KEY = "digest-bot.preset";
 const SETTINGS_VERSION = 1;
 const byId = (id) => document.getElementById(id);
-const workspace = byId("workspace-view");
-const editor = byId("editor-view");
+const workspaceIntro = byId("workspace-intro");
+const workspaceControls = byId("workspace-controls");
+const editorIntro = byId("editor-intro");
+const grid = byId("work-grid");
 const form = byId("editor-form");
+const subjectField = form.elements.namedItem("subject");
 const recipientField = form.elements.namedItem("recipient");
-const preview = byId("preview-panel");
 const previewFrame = byId("email-preview");
 const fileInput = byId("file-input");
 const dropZone = byId("drop-zone");
 const download = byId("download");
-const layoutControls = Array.from(form.querySelectorAll("[name=layout]"));
-const palettes = Array.from(form.querySelectorAll("[data-palette]"));
-const defaultKey = JSON.stringify(DEFAULT_PRESET);
 
 const sample = {
-  title: "Service Desk news",
-  subject: "Service Desk news",
-  intro: "Updates and reminders for the week ahead.",
-  siteUrl: "https://www.sharepoint.com/",
-  notice: "",
   articles: [
     {
       title: "New study spaces open Monday",
@@ -49,6 +43,8 @@ const sample = {
 let preset = loadPreset();
 let draft = { ...preset };
 let source = null;
+let logo = null;
+let logoRequest;
 let screen = "";
 let loading = false;
 let fileRequest = 0;
@@ -74,8 +70,9 @@ function announce(message) {
 }
 
 function syncPresetDetail() {
-  const name = JSON.stringify(preset) === defaultKey ? "Default preset" : "Saved preset";
-  byId("preset-detail").textContent = name + " · " + LAYOUTS[preset.layout];
+  byId("preset-detail").textContent = preset.subject === DEFAULT_PRESET.subject
+    ? "Default subject line"
+    : "Custom subject line";
 }
 
 function syncFileDetail() {
@@ -92,26 +89,28 @@ function syncFileDetail() {
   byId("download-detail").textContent = source ? "Your formatted digest is ready." : "Add a source email to enable download.";
 }
 
-function renderPreview() {
+function renderPreview(date = new Date()) {
   clearTimeout(previewTimer);
   const model = source?.digest || sample;
-  const rendered = renderDigest(model, screen === "editor" ? draft : preset, { preview: true });
+  const rendered = renderDigest(model, screen === "editor" ? draft : preset, { date, logo, preview: true });
   byId("preview-source").textContent = source ? "Uploaded email" : "Sample email";
   byId("preview-caption").textContent = screen === "editor" ? "Updates as you edit" : "Previewing the saved preset";
   byId("preview-subject").textContent = rendered.subject;
   byId("preview-recipient-row").hidden = !rendered.recipient;
   byId("preview-recipient").textContent = rendered.recipient;
-  previewFrame.srcdoc = rendered.html;
+  if (previewFrame.srcdoc !== rendered.html) previewFrame.srcdoc = rendered.html;
 }
 
 function openScreen(next, scroll) {
   if (next === screen) return;
   screen = next;
   const editing = next === "editor";
-  workspace.hidden = editing;
-  editor.hidden = !editing;
-  const slot = byId(editing ? "editor-preview" : "workspace-preview");
-  if (preview.parentElement !== slot) slot.append(preview);
+  workspaceIntro.hidden = editing;
+  workspaceControls.hidden = editing;
+  editorIntro.hidden = !editing;
+  form.hidden = !editing;
+  grid.classList.toggle("editor-grid", editing);
+  // Keep the preview mounted while switching screens so its document and scroll position survive.
   for (const link of document.querySelectorAll("[data-tab]")) {
     if (link.dataset.tab === next) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
@@ -121,41 +120,20 @@ function openScreen(next, scroll) {
 }
 
 function syncEditor() {
-  for (const indicator of form.querySelectorAll("[data-colour]")) {
-    indicator.textContent = draft[indicator.dataset.colour].toUpperCase();
-  }
-  for (const button of palettes) {
-    const matches = Object.entries(PALETTES[button.dataset.palette]).every(
-      ([key, value]) => value.toLowerCase() === draft[key].toLowerCase(),
-    );
-    button.setAttribute("aria-pressed", String(matches));
-  }
-  byId("draft-status").textContent = JSON.stringify(draft) === JSON.stringify(preset) ? "" : "Unsaved changes";
+  const dirty = draft.subject !== preset.subject || draft.recipient !== preset.recipient;
+  byId("draft-status").textContent = dirty ? "Unsaved changes" : "";
 }
 
 function writeForm(values) {
   draft = { ...values };
-  for (const [key, value] of Object.entries(values)) {
-    if (key === "layout") {
-      for (const control of layoutControls) control.checked = control.value === value;
-      continue;
-    }
-    const control = form.elements.namedItem(key);
-    if (typeof value === "boolean") control.checked = value;
-    else control.value = value;
-  }
+  subjectField.value = draft.subject;
+  recipientField.value = draft.recipient;
   recipientField.setCustomValidity("");
   syncEditor();
 }
 
 function readForm() {
-  const values = {};
-  for (const [key, value] of Object.entries(DEFAULT_PRESET)) {
-    const control = form.elements.namedItem(key);
-    values[key] = typeof value === "boolean" ? control.checked : control.value;
-  }
-  for (const key of ["headerColor", "accentColor", "backgroundColor"]) values[key] = values[key].toUpperCase();
-  return values;
+  return { subject: subjectField.value, recipient: recipientField.value };
 }
 
 function changeForm() {
@@ -174,7 +152,6 @@ function savePreset(event) {
     return;
   }
   preset = normalisePreset(readForm());
-  preset.recipient = preset.recipient.trim();
   writeForm(preset);
   syncPresetDetail();
   try {
@@ -238,15 +215,21 @@ function fileDrop(event) {
   else if (files.length > 1) showFileError("Drop one .eml file at a time.");
 }
 
-function downloadEmail() {
+async function downloadEmail() {
   if (!source || loading) return;
+  const selected = source;
+  const savedPreset = preset;
   try {
-    const content = formatDigest(source.digest, preset);
+    const brandImage = await loadLogo();
+    if (source !== selected) return;
+    const date = new Date();
+    const content = formatDigest(selected.digest, savedPreset, date, brandImage);
+    renderPreview(date);
     const blob = new Blob([content], { type: "message/rfc822" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = source.name.replace(/\.eml$/i, "") + "-formatted.eml";
+    link.download = selected.name.replace(/\.eml$/i, "") + "-formatted.eml";
     document.body.append(link);
     link.click();
     link.remove();
@@ -256,13 +239,30 @@ function downloadEmail() {
   }
 }
 
+async function loadImage(path, type) {
+  const response = await fetch(new URL(path, import.meta.url));
+  if (!response.ok) throw new Error("Couldn’t load a digest image.");
+  return { kind: "inline", type, bytes: new Uint8Array(await response.arrayBuffer()) };
+}
+
+function loadLogo() {
+  if (!logoRequest) {
+    logoRequest = loadImage("assets/bond-logo.png", "image/png").then((image) => {
+      logo = image;
+      renderPreview();
+      return image;
+    }).catch((error) => {
+      logoRequest = null;
+      throw error;
+    });
+  }
+  return logoRequest;
+}
+
 async function loadSampleImages() {
   const files = ["sample-study.webp", "sample-wifi.webp"];
   await Promise.allSettled(files.map(async (file, index) => {
-    const response = await fetch(new URL(file, import.meta.url));
-    if (!response.ok) return;
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    sample.articles[index].image = { kind: "inline", id: file, type: "image/webp", bytes };
+    sample.articles[index].image = await loadImage(file, "image/webp");
   }));
   if (!source) renderPreview();
 }
@@ -293,12 +293,6 @@ for (const type of ["dragover", "drop"]) {
 }
 download.addEventListener("click", downloadEmail);
 
-for (const button of palettes) {
-  button.addEventListener("click", () => {
-    writeForm({ ...readForm(), ...PALETTES[button.dataset.palette] });
-    renderPreview();
-  });
-}
 form.addEventListener("input", changeForm);
 form.addEventListener("submit", savePreset);
 byId("reset-preset").addEventListener("click", () => {
@@ -314,4 +308,6 @@ writeForm(preset);
 syncPresetDetail();
 syncFileDetail();
 openScreen(location.hash === "#editor" ? "editor" : "workspace", false);
+// Keep the preview usable and retry the asset when downloading if this initial request fails.
+loadLogo().catch(() => {});
 loadSampleImages();

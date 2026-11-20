@@ -1,49 +1,37 @@
-export const LAYOUTS = Object.freeze({
-  rows: "Feature rows",
-  cards: "Stacked cards",
-  compact: "Compact list",
-});
-
-export const PALETTES = Object.freeze({
-  cobalt: { headerColor: "#153657", accentColor: "#2866A6", backgroundColor: "#EEF3F8" },
-  ocean: { headerColor: "#124967", accentColor: "#087A94", backgroundColor: "#EDF6F8" },
-  forest: { headerColor: "#18483D", accentColor: "#27745C", backgroundColor: "#EDF5F0" },
-  plum: { headerColor: "#472F67", accentColor: "#7644AA", backgroundColor: "#F2EDF8" },
-});
-
 export const DEFAULT_PRESET = Object.freeze({
-  layout: "rows",
-  font: "sans",
-  ...PALETTES.cobalt,
-  subject: "",
-  title: "",
-  label: "NEWS DIGEST",
-  intro: "",
-  footer: "",
-  linkLabel: "Read article",
+  subject: "Bond Staff News | DAY_OF_WEEK DATE_DAY DATE_MONTH DATE_YEAR",
   recipient: "",
-  showImages: true,
-  showSummary: true,
-  showAuthor: true,
-  showDate: true,
-  showViews: false,
-  showOriginalIntro: false,
-  showSiteLink: true,
-  showNotice: true,
 });
 
-export function normalisePreset(input = {}) {
-  const preset = { ...DEFAULT_PRESET };
-  for (const key of Object.keys(preset)) {
-    if (typeof input[key] === typeof preset[key]) preset[key] = input[key];
-  }
-  if (!Object.hasOwn(LAYOUTS, preset.layout)) preset.layout = DEFAULT_PRESET.layout;
-  if (!["sans", "serif"].includes(preset.font)) preset.font = DEFAULT_PRESET.font;
-  for (const key of ["headerColor", "accentColor", "backgroundColor"]) {
-    if (!/^#[a-f\d]{6}$/i.test(preset[key])) preset[key] = DEFAULT_PRESET[key];
-  }
-  if (!validRecipient(preset.recipient)) preset.recipient = "";
-  return preset;
+const brisbaneDate = new Intl.DateTimeFormat("en-AU", {
+  timeZone: "Australia/Brisbane",
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
+const dateTokens = {
+  DAY_OF_WEEK: "weekday",
+  DATE_DAY: "day",
+  DATE_MONTH: "month",
+  DATE_YEAR: "year",
+};
+
+export function normalisePreset(input) {
+  const subject = typeof input?.subject === "string"
+    ? input.subject.replace(/[\u0000-\u001f\u007f]+/g, " ").trim()
+    : "";
+  const recipient = typeof input?.recipient === "string" ? input.recipient.trim() : "";
+  return {
+    subject: subject || DEFAULT_PRESET.subject,
+    recipient: validRecipient(recipient) ? recipient : "",
+  };
+}
+
+export function formatSubject(template, date) {
+  const parts = Object.fromEntries(brisbaneDate.formatToParts(date).map(({ type, value }) => [type, value]));
+  return template.replace(/\b(DAY_OF_WEEK|DATE_DAY|DATE_MONTH|DATE_YEAR)\b/g, (token) => parts[dateTokens[token]]);
 }
 
 export function validRecipient(value) {

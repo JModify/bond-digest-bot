@@ -1,167 +1,129 @@
 import { toBase64 } from "./mime.js";
-import { normalisePreset } from "./preset.js";
+import { formatSubject, normalisePreset } from "./preset.js";
 
+const title = "Staff News";
+const introduction = "See the latest Showcase News items";
+const footer = "View all news and upcoming events";
+const defaultSiteUrl = "https://bonduni.sharepoint.com/sites/News";
+const font = "'Segoe UI',Tahoma,Arial,sans-serif";
+const imageCache = new WeakMap();
 const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const escape = (text) => String(text).replace(/[&<>"']/g, (character) => entities[character]);
-const paragraphs = (text) => escape(text).replace(/\r?\n/g, "<br>");
-const imageCache = new WeakMap();
-const ink = "#142340";
-const muted = "#4F5F78";
-const sans = "'Segoe UI',Arial,sans-serif";
-const serif = "Georgia,'Times New Roman',serif";
 
-function foreground(background) {
-  const channels = background.slice(1).match(/../g).map((hex) => {
-    const channel = Number.parseInt(hex, 16) / 255;
-    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-  });
-  const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-  return luminance >= 0.179 ? "#000000" : "#FFFFFF";
-}
-
-function imageSource(image, context) {
+function imageSource(image, context, label = "article") {
   if (!image) return "";
+  if (image.kind === "remote") return context.preview ? "" : image.url;
+  const { bytes, type } = image;
   if (context.preview) {
-    if (image.kind === "remote") return "";
-    // The same attachment is reused when the editor updates the preview.
-    if (!imageCache.has(image.bytes)) {
-      imageCache.set(image.bytes, `data:${image.type};base64,${toBase64(image.bytes)}`);
-    }
-    return imageCache.get(image.bytes);
+    if (!imageCache.has(bytes)) imageCache.set(bytes, `data:${type};base64,${toBase64(bytes)}`);
+    return imageCache.get(bytes);
   }
-  if (image.kind === "remote") return image.url;
-  const { id, type, bytes } = image;
-  if (!context.attachments.has(id)) {
-    const newId = `article-${context.attachments.size + 1}@digest-bot.local`;
-    context.attachments.set(id, { id: newId, type, bytes });
+  if (!context.attachments.has(bytes)) {
+    const id = `${label}-${context.attachments.size + 1}@digest-bot.local`;
+    context.attachments.set(bytes, { id, type, bytes });
   }
-  return "cid:" + context.attachments.get(id).id;
+  return "cid:" + context.attachments.get(bytes).id;
 }
 
 function link(href, label, style, preview) {
-  const tag = preview ? "span" : "a";
-  const attributes = preview ? "" : ` href="${escape(href)}"`;
-  return `<${tag}${attributes} style="${style}">${escape(label)}</${tag}>`;
+  if (preview) return `<span style="${style}">${escape(label)}</span>`;
+  return `<a href="${escape(href)}" style="${style}">${escape(label)}</a>`;
 }
 
-function imageMarkup(article, context, width, height, stacked) {
-  const source = imageSource(article.image, context);
-  if (!source && !article.image) return "";
-  if (!source) {
-    return `<div style="width:100%;height:${height}px;line-height:${height}px;background:#e8eef9;color:#4f5f78;font-size:11px;text-align:center;">Remote image</div>`;
-  }
-  const max = stacked ? "width:100%;max-width:552px;" : "width:100%;";
-  return `<img src="${escape(source)}" alt="${escape(article.title)}" width="${width}" height="${height}"
-    style="display:block;${max}height:${height}px;object-fit:cover;border:0;border-radius:7px;">`;
+function renderLogo(logo, context) {
+  const src = imageSource(logo, context, "bond-logo");
+  return src
+    ? `<img src="${escape(src)}" alt="Bond University" width="214" height="82" style="display:block;width:214px;max-width:100%;height:auto;margin:0 auto;border:0;">`
+    : `<p style="margin:0;line-height:82px;font-weight:600;color:#153657;">Bond University</p>`;
+}
+
+function renderThumbnail(article, context) {
+  if (!article.image) return "";
+  const src = imageSource(article.image, context);
+  return src
+    ? `<img src="${escape(src)}" alt="${escape(article.title)}" width="210" style="display:block;width:210px;max-width:100%;height:auto;border:0;">`
+    : `<div style="width:210px;max-width:100%;background:#eee;color:#666;text-align:center;font-size:11px;line-height:116px;">Remote image</div>`;
 }
 
 function renderArticle(article, context) {
-  const { preset, preview } = context;
-  const compact = preset.layout === "compact";
-  const stacked = preset.layout === "cards";
-  const hasImage = preset.showImages && Boolean(article.image);
-  const density = compact ? 12 : 17;
-  const heading = compact ? 16 : 19;
-  const width = stacked ? 552 : compact ? 64 : 137;
-  const height = stacked ? 188 : compact ? 56 : 105;
-  const articleTitle = link(article.href, article.title, `color:${ink};text-decoration:none;`, preview);
-  const metadata = [
-    preset.showAuthor && article.author,
-    preset.showDate && article.date,
-    preset.showViews && article.views,
-  ].filter(Boolean);
-  const image = hasImage ? imageMarkup(article, context, width, height, stacked) : "";
+  const articleTitle = link(article.href, article.title, "color:#333;text-decoration:none;", context.preview);
+  const image = renderThumbnail(article, context);
+  const summary = escape(article.summary ?? "").replace(/\r?\n/g, "<br>");
   const html = `
-    <tr><td style="padding:0 0 ${compact ? 8 : 12}px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fff;border:1px solid #DCE5F3;border-radius:10px;">
-        ${image && stacked ? `<tr><td style="padding:${density}px ${density}px 0;">${image}</td></tr>` : ""}
-        <tr>
-          ${image && !stacked ? `<td class="article-image ${compact ? "compact-image" : ""}" width="${width}" valign="top" style="width:${width}px;padding:${density}px 0 ${density}px ${density}px;">${image}</td>` : ""}
-          <td valign="top" style="padding:${density}px;">
-            <h2 style="margin:0;font-size:${heading}px;line-height:1.27;font-weight:700;color:${ink};">${articleTitle}</h2>
-            ${metadata.length ? `<p style="margin:6px 0 0;color:${muted};font-size:11px;line-height:1.5;">${escape(metadata.join(" · "))}</p>` : ""}
-            ${preset.showSummary && article.summary ? `<p style="margin:7px 0 0;color:${ink};font-size:13px;line-height:1.55;">${paragraphs(article.summary)}</p>` : ""}
-            ${preset.linkLabel.trim() ? `<p style="margin:8px 0 0;line-height:1.45;">${link(article.href, preset.linkLabel.trim(),
-    `font-size:12px;font-weight:700;color:${context.linkColour};text-decoration:underline;`, preview)}</p>` : ""}
-          </td>
-        </tr>
-      </table>
-    </td></tr>`;
-  const text = [
-    article.title,
-    metadata.join(" · "),
-    preset.showSummary ? article.summary : "",
-    (preset.linkLabel.trim() ? preset.linkLabel.trim() + " " : "") + article.href,
-  ].filter(Boolean).join("\n");
+    <tr>
+      ${image ? `<td class="article-image" width="220" valign="top" style="width:220px;padding:20px 0;">${image}</td>` : ""}
+      <td class="article-copy${image ? " with-image" : ""}" ${image ? "" : 'colspan="2"'} valign="top" style="padding:20px 0 20px ${image ? "20px" : "0"};overflow-wrap:anywhere;">
+        <h2 style="margin:0 0 10px;font-size:17px;line-height:20px;font-weight:400;">${articleTitle}</h2>
+        ${summary ? `<p style="margin:0 0 12px;font-size:14px;line-height:1.4;color:#666;">${summary}</p>` : ""}
+        ${article.author ? `<p style="margin:0 0 3px;font-size:12px;line-height:13.5px;color:#231f20;">${escape(article.author)}</p>` : ""}
+        ${article.date ? `<p style="margin:0;font-size:11px;line-height:13.5px;color:#767676;">${escape(article.date)}</p>` : ""}
+        ${article.views ? `<p style="margin:10px 0 0;font-size:10px;line-height:1.4;color:#a6a6a6;">${escape(article.views)}</p>` : ""}
+      </td>
+    </tr>`;
+  const text = [article.title, article.href, article.summary, article.author, article.date, article.views]
+    .filter(Boolean).join("\n");
   return { html, text };
 }
 
-export function renderDigest(digest, input, { preview = false } = {}) {
+const divider = '<tr><td colspan="2" style="border-top:1px solid #d6d6d6;font-size:0;line-height:1px;height:1px;">&nbsp;</td></tr>';
+
+export function renderDigest(digest, input, { date = new Date(), logo, preview = false } = {}) {
   const preset = normalisePreset(input);
-  const subject = preset.subject.trim() || digest.subject || digest.title;
-  const title = preset.title.trim() || digest.title;
-  const intro = preset.intro.trim() || (preset.showOriginalIntro ? digest.intro : "");
-  const siteUrl = preset.showSiteLink && digest.siteUrl;
-  const notice = preset.showNotice && digest.notice;
-  const footer = preset.footer.trim();
-  const font = preset.font === "serif" ? serif : sans;
-  const headerInk = foreground(preset.headerColor);
-  const linkColour = foreground(preset.accentColor) === "#FFFFFF" ? preset.accentColor : "#193E85";
-  const context = { preset, preview, linkColour, attachments: new Map() };
+  const subject = formatSubject(preset.subject, date);
+  const siteUrl = digest.siteUrl || defaultSiteUrl;
+  const context = { preview, attachments: new Map() };
+  const headerLogo = renderLogo(logo, context);
   const articles = digest.articles.map((article) => renderArticle(article, context));
 
   const html = `<!doctype html>
-<html lang="en">
+<html lang="en-AU">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${preview ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">` : ""}
-<title>${escape(subject)}</title>
+<title>${preview ? "Formatted email" : escape(subject)}</title>
 <style>
   @media only screen and (max-width: 460px) {
-    .outer { padding: 12px !important; }
-    .digest-head { padding: 24px 18px !important; }
-    .article-image:not(.compact-image) { width: 86px !important; }
-    .article-image:not(.compact-image) img { height: 74px !important; }
-  }
-  @media only screen and (max-width: 350px) {
-    .article-image:not(.compact-image) { display: block; width: auto !important; padding-bottom: 0 !important; }
-    .article-image:not(.compact-image) img { max-width: 118px; }
-    .article-image:not(.compact-image) + td { display: block; }
+    .digest-outer { padding: 16px 10px !important; }
+    .digest-articles { table-layout: auto !important; }
+    .digest-articles colgroup { display: none !important; }
+    .article-image, .article-copy { display: block !important; width: 100% !important; box-sizing: border-box; }
+    .article-image { padding-bottom: 0 !important; }
+    .article-copy.with-image { padding: 14px 0 20px !important; }
   }
 </style>
 </head>
-<body style="margin:0;background-color:${preset.backgroundColor};color:${ink};font-family:${font};">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${preset.backgroundColor};font-family:${font};">
-    <tr><td class="outer" align="center" style="padding:18px;">
-      <!--[if mso]><table role="presentation" width="600"><tr><td><![endif]-->
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;">
-        <tr><td class="digest-head" style="padding:25px 23px;background-color:${preset.headerColor};color:${headerInk};border-top:3px solid ${preset.accentColor};border-radius:10px;">
-          ${preset.label.trim() ? `<p style="margin:0 0 7px;font-size:10px;font-weight:700;letter-spacing:2px;line-height:1.5;">${escape(preset.label.trim())}</p>` : ""}
-          <h1 style="margin:0;color:${headerInk};font-size:29px;font-weight:700;line-height:1.18;">${escape(title)}</h1>
-          ${intro ? `<p style="margin:10px 0 0;font-size:14px;line-height:1.5;">${paragraphs(intro)}</p>` : ""}
+<body style="margin:0;background-color:#fff;color:#222;font-family:${font};" dir="ltr">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fff;font-family:${font};">
+    <tr><td align="center" class="digest-outer" style="padding:22px 0 0;">
+      <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+        style="max-width:600px;border:1px solid #dedede;border-collapse:collapse;margin:0 auto;">
+        <tr><td align="center" style="padding:20px 20px 36px;border-bottom:1px solid #c8c8c8;background-color:#fff;">
+          ${headerLogo}
+          <h1 style="margin:30px 0 10px;font-size:24px;line-height:32px;font-weight:600;color:#222;">${title}</h1>
+          <p style="margin:0;font-size:17px;line-height:1.35;color:#95989a;">${introduction}</p>
         </td></tr>
-        <tr><td style="padding-top:13px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${articles.map((article) => article.html).join("")}</table>
+        <tr><td style="padding:0 20px;background-color:#f8f8f8;">
+          <table role="presentation" class="digest-articles" width="100%" cellpadding="0" cellspacing="0" border="0"
+            style="table-layout:fixed;border-collapse:collapse;">
+            <colgroup><col width="220" style="width:220px;"><col></colgroup>${articles.map((article) => article.html).join(divider)}</table>
         </td></tr>
-        ${siteUrl || footer || notice ? `<tr><td align="center" style="padding:3px 18px 4px;color:${muted};font-size:11px;line-height:1.55;">
-          ${siteUrl ? `<p style="margin:0 0 7px;">${link(siteUrl, "Visit SharePoint site", `font-size:12px;font-weight:700;color:${linkColour};text-decoration:underline;`, preview)}</p>` : ""}
-          ${footer ? `<p style="margin:0 0 7px;">${paragraphs(footer)}</p>` : ""}
-          ${notice ? `<p style="margin:0;">${escape(notice)}</p>` : ""}
-        </td></tr>` : ""}
+        <tr><td align="center" style="padding:30px;border-top:1px solid #dedede;background-color:#fff;font-size:14px;line-height:1.4;">
+          ${link(siteUrl, footer, "color:#0000ee;text-decoration:underline;", preview)}
+        </td></tr>
       </table>
       <!--[if mso]></td></tr></table><![endif]-->
     </td></tr>
   </table>
 </body>
 </html>`;
-  const text = [
-    [preset.label.trim(), title, intro].filter(Boolean).join("\n"),
-    ...articles.map((article) => article.text),
-    siteUrl ? "Visit SharePoint site " + siteUrl : "",
-    footer,
-    notice,
-  ].filter(Boolean).join("\n\n");
 
-  return { subject, recipient: preset.recipient.trim(), html, text, images: Array.from(context.attachments.values()) };
+  const text = [
+    `${title}\n${introduction}`,
+    ...articles.map((article) => article.text),
+    `${footer}\n${siteUrl}`,
+  ].join("\n\n");
+
+  return { subject, recipient: preset.recipient, html, text, images: Array.from(context.attachments.values()) };
 }
