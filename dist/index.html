@@ -23,7 +23,7 @@
         <a href="#workspace" data-tab="workspace" aria-current="page"><i class="icon icon-grid" aria-hidden="true"></i>Workspace</a>
         <a href="#editor" data-tab="editor"><i class="icon icon-edit" aria-hidden="true"></i>Digest editor</a>
       </nav>
-      <span class="version">v1.0.1</span>
+      <span class="version">v1.0.2</span>
     </div>
   </header>
 
@@ -54,7 +54,7 @@
     <section class="editor-intro" id="editor-intro" aria-labelledby="editor-title" hidden>
       <div>
         <h1 id="editor-title">Digest editor</h1>
-        <p>Save the subject line and optional recipient for your digests.</p>
+        <p>Save the subject line and email addresses for your digests.</p>
       </div>
       <a class="button button-secondary" href="#workspace">Back to workspace</a>
     </section>
@@ -110,9 +110,12 @@
               <p id="download-detail">Add a source email to enable download.</p>
             </div>
           </div>
-          <button class="button button-primary download-button" type="button" id="download" disabled><i class="icon icon-download" aria-hidden="true"></i> Download .eml</button>
+          <div class="download-actions">
+            <button class="button button-primary" type="button" id="download" disabled><i class="icon icon-download" aria-hidden="true"></i> Download .eml</button>
+            <button class="button button-secondary" type="button" id="download-draft" aria-describedby="draft-help" disabled>Download editable draft</button>
+          </div>
+          <p class="field-help draft-help" id="draft-help">Editable drafts follow Outlook’s signature settings.</p>
         </section>
-        <p class="privacy-note"><i class="icon icon-lock" aria-hidden="true"></i> Your email is processed on this device.</p>
       </div>
 
       <form class="panel editor-panel" id="editor-form" aria-labelledby="editor-title" hidden>
@@ -121,11 +124,15 @@
         </label>
         <p class="field-help" id="subject-help">Date placeholders insert today’s date in Brisbane.</p>
 
-        <label class="field recipient-field">
-          <span>To address <span class="optional">Optional</span></span>
-          <input type="email" name="recipient" placeholder="name@example.com" aria-describedby="recipient-help" autocomplete="email" maxlength="254">
+        <label class="field address-field">From address
+          <input type="email" name="from" autocomplete="off" maxlength="254">
         </label>
-        <p class="field-help" id="recipient-help">Prefills the To field in the downloaded email.</p>
+
+        <label class="field address-field">
+          <span>To address <span class="optional">Optional</span></span>
+          <input type="email" name="recipient" placeholder="name@example.com" aria-describedby="recipient-help" autocomplete="off" maxlength="254">
+        </label>
+        <p class="field-help" id="recipient-help">Fills from the uploaded email’s sender. Clear a custom address to use autofill again.</p>
 
         <div class="editor-actions">
           <button type="button" class="button button-quiet" id="reset-preset">Reset to defaults</button>
@@ -146,11 +153,12 @@
                 <p id="preview-caption">Previewing the saved preset</p>
               </div>
             </div>
-            <span class="source-label" id="preview-source">Sample email</span>
+            <span class="source-label" id="preview-source">Example articles</span>
           </div>
           <div class="email-pane">
             <dl class="email-meta">
               <div><dt>Subject</dt><dd id="preview-subject"></dd></div>
+              <div><dt>From</dt><dd id="preview-from"></dd></div>
               <div id="preview-recipient-row" hidden><dt>To</dt><dd id="preview-recipient"></dd></div>
             </dl>
             <iframe id="email-preview" sandbox="" title="Formatted email preview" referrerpolicy="no-referrer"></iframe>

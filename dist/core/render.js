@@ -125,5 +125,12 @@ ${preview ? `<meta http-equiv="Content-Security-Policy" content="default-src 'no
     `${footer}\n${siteUrl}`,
   ].join("\n\n");
 
-  return { subject, recipient: preset.recipient, html, text, images: Array.from(context.attachments.values()) };
+  return {
+    subject,
+    from: preset.from,
+    recipient: preset.recipient || digest.suggestedRecipient || "",
+    html,
+    text,
+    images: Array.from(context.attachments.values()),
+  };
 }

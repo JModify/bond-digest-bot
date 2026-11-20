@@ -350,21 +350,17 @@ main.shell { padding-top: 29px; padding-bottom: 34px; }
 .button-secondary:hover { border-color: #adc2ed; background: #f6f9ff; color: var(--blue-dark); }
 .button-primary { color: #fff; border-color: var(--navy); background: var(--navy); box-shadow: 0 2px 5px #15365724; }
 .button-primary:hover { background: var(--blue-dark); }
-.button-primary:disabled { color: #526583; border-color: #dce6f6; background: #eaf0fa; box-shadow: none; }
+.button-primary:disabled, .button-secondary:disabled { color: #526583; border-color: #dce6f6; background: #eaf0fa; box-shadow: none; }
 .button-quiet { color: var(--blue-dark); }
 .button-quiet:hover { background: #ecf2ff; }
 .icon-button { padding-inline: 6px; }
-.download-button { min-height: 42px; }
-.privacy-note {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--muted);
-  font-size: 0.8125rem;
-  line-height: 1.45;
-  padding: 0 2px;
+.download-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
 }
-.privacy-note .icon { transform: scale(.74); flex: none; }
+.download-actions .button { min-height: 42px; white-space: normal; }
+.draft-help { margin-top: 0; }
 
 .preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
 .source-label {
@@ -436,7 +432,7 @@ main.shell { padding-top: 29px; padding-bottom: 34px; }
 .field-help, .optional { color: var(--subtle); font-size: 0.8125rem; font-weight: 500; }
 .optional { margin-left: .3rem; }
 .field-help { margin-top: 7px; line-height: 1.4; }
-.recipient-field { margin-top: 20px; }
+.address-field { margin-top: 20px; }
 .editor-actions, .save-actions { display: flex; align-items: center; gap: 10px; }
 .editor-actions { justify-content: space-between; margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--soft-line); }
 .draft-status { color: var(--muted); font-size: .8125rem; }
@@ -469,8 +465,6 @@ main.shell { padding-top: 29px; padding-bottom: 34px; }
 .icon-folder::before { inset: 6px 1.5px 3px; border: 1.6px solid currentColor; border-radius: 2.5px; }
 .icon-folder::after { inset: 3px 11px auto 2px; height: 4px; border: 1.6px solid currentColor; border-bottom: 0; border-radius: 2px 2px 0 0; }
 .icon-grid::before { inset: 2px; background: linear-gradient(90deg,currentColor 42%,transparent 42%,transparent 58%,currentColor 58%); mask-image: linear-gradient(currentColor 42%,transparent 42%,transparent 58%,currentColor 58%); border-radius: 2px; }
-.icon-lock::before { inset: 8px 3px 2px; border: 1.6px solid currentColor; border-radius: 3px; }
-.icon-lock::after { inset: 2px 6px auto; height: 7px; border: 1.6px solid currentColor; border-bottom: 0; border-radius: 5px 5px 0 0; }
 .icon-close::before, .icon-close::after { inset: 9px 2px auto; height: 1.6px; border-radius: 2px; background: currentColor; transform: rotate(45deg); }
 .icon-close::after { transform: rotate(-45deg); }
 
@@ -503,6 +497,7 @@ main.shell { padding-top: 29px; padding-bottom: 34px; }
   .hero-context { font-size: .75rem; }
   .hero-copy > p:last-child { font-size: .9375rem; margin-top: 10px; }
   .work-grid { margin-top: 14px; }
+  .download-actions { grid-template-columns: 1fr; }
   .panel { padding: 15px; }
   .preview-heading { align-items: start; }
   .editor-intro { flex-wrap: wrap; align-items: start; }

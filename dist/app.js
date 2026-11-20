@@ -1,5 +1,6 @@
 import { formatDigest, readDigest } from "./core/digest.js";
-import { DEFAULT_PRESET, normalisePreset, validRecipient } from "./core/preset.js";
+import { normaliseAddress } from "./core/mailbox.js";
+import { DEFAULT_PRESET, normalisePreset } from "./core/preset.js";
 import { renderDigest } from "./core/render.js";
 
 const STORAGE_KEY = "digest-bot.preset";
@@ -11,30 +12,32 @@ const editorIntro = byId("editor-intro");
 const grid = byId("work-grid");
 const form = byId("editor-form");
 const subjectField = form.elements.namedItem("subject");
+const fromField = form.elements.namedItem("from");
 const recipientField = form.elements.namedItem("recipient");
 const previewFrame = byId("email-preview");
 const fileInput = byId("file-input");
 const dropZone = byId("drop-zone");
-const download = byId("download");
+const downloadMessage = byId("download");
+const downloadDraft = byId("download-draft");
 
-const sample = {
+const example = {
   articles: [
     {
-      title: "New study spaces open Monday",
-      href: "https://example.com/news/study-spaces",
-      summary: "Book a quiet desk or group study room in the newly opened North Wing.",
-      author: "Campus Services",
-      date: "16 November 2026",
-      views: "48 views",
+      title: "Example campus update",
+      href: "https://example.com/news/example-campus-update",
+      summary: "A short summary of a fictional campus announcement appears here.",
+      author: "Example author",
+      date: "19/11/2026",
+      views: "12 views",
       image: null,
     },
     {
-      title: "Wi-Fi maintenance this Friday",
-      href: "https://example.com/news/wi-fi-maintenance",
-      summary: "A scheduled upgrade may briefly interrupt campus Wi-Fi between 6 and 7 pm.",
-      author: "IT Services",
-      date: "17 November 2026",
-      views: "31 views",
+      title: "Example service announcement",
+      href: "https://example.com/news/example-service-announcement",
+      summary: "This example shows how a second article and its image fit into the digest.",
+      author: "Example author",
+      date: "19/11/2026",
+      views: "8 views",
       image: null,
     },
   ],
@@ -80,7 +83,8 @@ function syncFileDetail() {
   byId("file-detail").hidden = !source;
   byId("file-loading").hidden = !loading;
   dropZone.setAttribute("aria-busy", String(loading));
-  download.disabled = loading || !source;
+  downloadMessage.disabled = loading || !source;
+  downloadDraft.disabled = downloadMessage.disabled;
   if (source) {
     const count = source.digest.articles.length;
     byId("file-name").textContent = source.name;
@@ -91,11 +95,12 @@ function syncFileDetail() {
 
 function renderPreview(date = new Date()) {
   clearTimeout(previewTimer);
-  const model = source?.digest || sample;
+  const model = source?.digest || example;
   const rendered = renderDigest(model, screen === "editor" ? draft : preset, { date, logo, preview: true });
-  byId("preview-source").textContent = source ? "Uploaded email" : "Sample email";
+  byId("preview-source").textContent = source ? "Uploaded email" : "Example articles";
   byId("preview-caption").textContent = screen === "editor" ? "Updates as you edit" : "Previewing the saved preset";
   byId("preview-subject").textContent = rendered.subject;
+  byId("preview-from").textContent = rendered.from;
   byId("preview-recipient-row").hidden = !rendered.recipient;
   byId("preview-recipient").textContent = rendered.recipient;
   if (previewFrame.srcdoc !== rendered.html) previewFrame.srcdoc = rendered.html;
@@ -120,25 +125,42 @@ function openScreen(next, scroll) {
 }
 
 function syncEditor() {
-  const dirty = draft.subject !== preset.subject || draft.recipient !== preset.recipient;
+  const dirty = Object.keys(DEFAULT_PRESET).some((key) => draft[key] !== preset[key]);
   byId("draft-status").textContent = dirty ? "Unsaved changes" : "";
+}
+
+function syncRecipientField() {
+  recipientField.value = draft.recipient || source?.digest.suggestedRecipient || "";
+}
+
+function clearAddressErrors() {
+  fromField.setCustomValidity("");
+  recipientField.setCustomValidity("");
 }
 
 function writeForm(values) {
   draft = { ...values };
   subjectField.value = draft.subject;
-  recipientField.value = draft.recipient;
-  recipientField.setCustomValidity("");
+  fromField.value = draft.from;
+  syncRecipientField();
+  clearAddressErrors();
   syncEditor();
 }
 
 function readForm() {
-  return { subject: subjectField.value, recipient: recipientField.value };
+  const entered = recipientField.value.trim();
+  const inferred = source?.digest.suggestedRecipient || "";
+  // Persist manual overrides only. Each upload has its own inferred recipient.
+  return {
+    subject: subjectField.value,
+    from: fromField.value.trim(),
+    recipient: entered === inferred ? "" : entered,
+  };
 }
 
 function changeForm() {
   draft = readForm();
-  recipientField.setCustomValidity("");
+  clearAddressErrors();
   syncEditor();
   clearTimeout(previewTimer);
   previewTimer = setTimeout(renderPreview, 120);
@@ -146,10 +168,12 @@ function changeForm() {
 
 function savePreset(event) {
   event.preventDefault();
-  if (!validRecipient(recipientField.value)) {
-    recipientField.setCustomValidity("Enter one email address, such as name@example.com.");
-    recipientField.reportValidity();
-    return;
+  for (const field of [fromField, recipientField]) {
+    if (field.value.trim() && !normaliseAddress(field.value)) {
+      field.setCustomValidity("Enter one email address, such as name@example.com.");
+      field.reportValidity();
+      return;
+    }
   }
   preset = normalisePreset(readForm());
   writeForm(preset);
@@ -186,6 +210,7 @@ async function acceptFile(file) {
     if (request !== fileRequest) return;
     const digest = readDigest(data, document);
     source = { name: file.name, digest };
+    syncRecipientField();
     renderPreview();
   } catch (error) {
     if (request === fileRequest) showFileError(error.message || "This email couldn’t be read.");
@@ -203,6 +228,7 @@ function removeFile() {
   loading = false;
   showFileError("");
   syncFileDetail();
+  syncRecipientField();
   renderPreview();
   byId("choose-file").focus();
 }
@@ -215,7 +241,7 @@ function fileDrop(event) {
   else if (files.length > 1) showFileError("Drop one .eml file at a time.");
 }
 
-async function downloadEmail() {
+async function downloadEmail(editable) {
   if (!source || loading) return;
   const selected = source;
   const savedPreset = preset;
@@ -223,13 +249,13 @@ async function downloadEmail() {
     const brandImage = await loadLogo();
     if (source !== selected) return;
     const date = new Date();
-    const content = formatDigest(selected.digest, savedPreset, date, brandImage);
+    const content = formatDigest(selected.digest, savedPreset, date, brandImage, { editable });
     renderPreview(date);
     const blob = new Blob([content], { type: "message/rfc822" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = selected.name.replace(/\.eml$/i, "") + "-formatted.eml";
+    link.download = selected.name.replace(/\.eml$/i, "") + (editable ? "-draft.eml" : "-formatted.eml");
     document.body.append(link);
     link.click();
     link.remove();
@@ -259,10 +285,10 @@ function loadLogo() {
   return logoRequest;
 }
 
-async function loadSampleImages() {
+async function loadExampleImages() {
   const files = ["sample-study.webp", "sample-wifi.webp"];
   await Promise.allSettled(files.map(async (file, index) => {
-    sample.articles[index].image = await loadImage(file, "image/webp");
+    example.articles[index].image = await loadImage(file, "image/webp");
   }));
   if (!source) renderPreview();
 }
@@ -291,7 +317,8 @@ for (const type of ["dragover", "drop"]) {
     if (event.dataTransfer.types.includes("Files")) event.preventDefault();
   });
 }
-download.addEventListener("click", downloadEmail);
+downloadMessage.addEventListener("click", () => downloadEmail(false));
+downloadDraft.addEventListener("click", () => downloadEmail(true));
 
 form.addEventListener("input", changeForm);
 form.addEventListener("submit", savePreset);
@@ -310,4 +337,4 @@ syncFileDetail();
 openScreen(location.hash === "#editor" ? "editor" : "workspace", false);
 // Keep the preview usable and retry the asset when downloading if this initial request fails.
 loadLogo().catch(() => {});
-loadSampleImages();
+loadExampleImages();

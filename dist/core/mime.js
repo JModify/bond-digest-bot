@@ -1,3 +1,5 @@
+import { mailboxFromHeader, normaliseAddress } from "./mailbox.js";
+
 // MIME decoding and serialization use byte arrays so Windows-1252 and UTF-8
 // messages go through the same pipeline in the browser or a future worker.
 const utf8 = new TextEncoder();
@@ -159,7 +161,15 @@ export function parseEmail(bytes) {
   const headerBytes = Uint8Array.from(encodedSubject, (character) => character.charCodeAt(0));
   const utf8Subject = decodeText(headerBytes, "utf-8");
   const subject = decodeHeader(utf8Subject.includes("�") ? decodeText(headerBytes, "windows-1252") : utf8Subject);
-  const result = { subject, html: "", text: "", images: new Map() };
+  const result = {
+    subject,
+    from: mailboxFromHeader(entity.headers.get("from")),
+    replyTo: mailboxFromHeader(entity.headers.get("reply-to")),
+    sender: mailboxFromHeader(entity.headers.get("sender")),
+    html: "",
+    text: "",
+    images: new Map(),
+  };
   try {
     readParts(entity, result);
   } catch (error) {
@@ -202,7 +212,7 @@ function emailPart(type, bytes, extra = []) {
   ].join(crlf);
 }
 
-export function serializeEmail({ subject, recipient, html, text, images }, date = new Date()) {
+export function serializeEmail({ subject, from, recipient, html, text, images }, date = new Date(), { editable = false } = {}) {
   const id = crypto.randomUUID();
   const alternative = "alt-" + id;
   const related = "rel-" + id;
@@ -213,9 +223,12 @@ export function serializeEmail({ subject, recipient, html, text, images }, date 
     `Subject: ${subjectHeader(subject)}`,
     "MIME-Version: 1.0",
   ];
-  if (recipient) lines.push("To: " + recipient);
-  // Render as a draft when imported by clients that honour this header.
-  lines.push("X-Unsent: 1");
+  const fromAddress = normaliseAddress(from);
+  const toAddress = normaliseAddress(recipient);
+  if (fromAddress) lines.push("From: " + fromAddress);
+  if (toAddress) lines.push("To: " + toAddress);
+  // Opening a draft lets the mail client apply its compose settings.
+  if (editable) lines.push("X-Unsent: 1");
   if (hasImages) {
     lines.push(`Content-Type: multipart/related; type="multipart/alternative"; boundary="${related}"`, "", boundary(related));
   }
