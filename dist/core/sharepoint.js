@@ -19,7 +19,7 @@ export function httpUrl(value) {
   }
 }
 
-function linkDestination(href) {
+export function linkDestination(href) {
   const url = new URL(href);
   if (url.hostname.endsWith(".safelinks.protection.outlook.com")) {
     return httpUrl(url.searchParams.get("url")) || href;

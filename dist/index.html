@@ -22,8 +22,9 @@
       <nav class="main-nav" aria-label="Digest Bot">
         <a href="#workspace" data-tab="workspace" aria-current="page"><i class="icon icon-grid" aria-hidden="true"></i>Workspace</a>
         <a href="#editor" data-tab="editor"><i class="icon icon-edit" aria-hidden="true"></i>Digest editor</a>
+        <a href="#email" data-tab="email"><i class="icon icon-mail" aria-hidden="true"></i>Email delivery</a>
       </nav>
-      <span class="version">v1.0.2</span>
+      <span class="version">v1.0.3</span>
     </div>
   </header>
 
@@ -120,13 +121,14 @@
 
       <form class="panel editor-panel" id="editor-form" aria-labelledby="editor-title" hidden>
         <label class="field">Subject line
-          <input type="text" name="subject" aria-describedby="subject-help">
+          <input type="text" name="subject" aria-describedby="subject-help" maxlength="300">
         </label>
         <p class="field-help" id="subject-help">Date placeholders insert today’s date in Brisbane.</p>
 
         <label class="field address-field">From address
-          <input type="email" name="from" autocomplete="off" maxlength="254">
+          <input type="email" name="from" autocomplete="off" maxlength="254" aria-describedby="from-help">
         </label>
+        <p class="field-help" id="from-help">For .eml downloads. Automatic delivery uses the server’s verified sender.</p>
 
         <label class="field address-field">
           <span>To address <span class="optional">Optional</span></span>
@@ -166,6 +168,72 @@
         </section>
       </div>
     </div>
+
+    <section id="email-view" aria-labelledby="email-title" hidden>
+      <div class="editor-intro">
+        <div>
+          <h1 id="email-title">Email delivery</h1>
+          <p>Send a SharePoint news digest to Digest Bot and get the formatted email back automatically.</p>
+        </div>
+        <a class="button button-secondary" href="#workspace">Back to workspace</a>
+      </div>
+
+      <div class="delivery-grid">
+        <section class="panel delivery-panel" aria-labelledby="delivery-title">
+          <div class="panel-heading">
+            <span class="heading-icon"><i class="icon icon-mail" aria-hidden="true"></i></span>
+            <div>
+              <h2 id="delivery-title">Send a digest</h2>
+              <p id="delivery-availability" role="status">Checking email delivery…</p>
+            </div>
+          </div>
+
+          <form id="delivery-form" hidden>
+            <label class="field address-field">Return email address
+              <input id="delivery-recipient" name="recipient" type="email" required maxlength="254" autocomplete="email" placeholder="name@bond.edu.au" aria-describedby="delivery-recipient-help">
+            </label>
+            <p class="field-help" id="delivery-recipient-help">The formatted digest will go to this address.</p>
+            <button class="button button-primary" id="start-delivery" type="submit">Start email delivery</button>
+          </form>
+          <p class="error" id="delivery-error" role="alert" hidden></p>
+
+          <div class="delivery-request" id="delivery-request" hidden>
+            <p class="delivery-state" id="delivery-state" role="status"></p>
+            <p class="field-help wrap-anywhere" id="delivery-return"></p>
+            <div id="delivery-sharepoint">
+              <p class="delivery-instructions">In SharePoint, choose <strong>Email a news digest</strong> and enter these values.</p>
+              <label class="field" for="delivery-inbox">To</label>
+              <div class="copy-field">
+                <input id="delivery-inbox" type="text" readonly>
+                <button class="button button-secondary" type="button" data-copy="delivery-inbox">Copy address</button>
+              </div>
+              <label class="field" for="delivery-code">Title</label>
+              <div class="copy-field">
+                <input id="delivery-code" type="text" readonly>
+                <button class="button button-secondary" type="button" data-copy="delivery-code">Copy title</button>
+              </div>
+              <p class="field-help" id="delivery-expiry"></p>
+            </div>
+            <button class="button button-secondary" id="delivery-reset" type="button" hidden>Start another digest</button>
+          </div>
+        </section>
+
+        <section class="panel delivery-panel" id="delivery-settings" aria-labelledby="delivery-settings-title" hidden>
+          <div class="panel-heading">
+            <span class="heading-icon"><i class="icon icon-edit" aria-hidden="true"></i></span>
+            <div>
+              <h2 id="delivery-settings-title">Formatting preset</h2>
+              <p>Changes to your preset apply to the next request.</p>
+            </div>
+          </div>
+          <dl class="delivery-meta">
+            <div><dt>Subject line</dt><dd id="delivery-subject"></dd></div>
+            <div><dt>Sending address</dt><dd id="delivery-from"></dd></div>
+          </dl>
+          <a class="button button-secondary" href="#editor">Edit preset</a>
+        </section>
+      </div>
+    </section>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 </body>

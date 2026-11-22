@@ -1,6 +1,18 @@
 {
   "name": "digest-bot",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "3.1175.0",
+    "jsdom": "31.0.1",
+    "smtp-server": "3.21.7"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server/main.js",
+    "test": "node --test"
+  }
 }

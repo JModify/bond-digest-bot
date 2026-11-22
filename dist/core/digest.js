@@ -14,6 +14,6 @@ export function readDigest(bytes, document) {
   return { ...digest, suggestedRecipient };
 }
 
-export function formatDigest(digest, preset, date = new Date(), logo, { editable = false } = {}) {
-  return serializeEmail(renderDigest(digest, preset, { date, logo }), date, { editable });
+export function formatDigest(digest, preset, date = new Date(), logo, options = {}) {
+  return serializeEmail(renderDigest(digest, preset, { date, logo }), date, options);
 }

@@ -1,25 +1,16 @@
-# Digest Bot v1.0.2
+# Digest Bot v1.0.3
 
-Digest Bot is a standalone website for styling SharePoint news digest emails. Choose or drop a SharePoint `.eml` file, then download it in the Bond Staff News format.
+Digest Bot formats SharePoint news emails using the Bond Staff News layout.
 
-The Digest editor lets you change the subject and the From and To addresses. The default subject inserts the current Brisbane date. From defaults to `bondstaffnews@bond.edu.au`. To picks up the uploaded email’s sender unless you save a custom address. Clear the custom address to restore autofill.
+- **Email delivery.** Save the subject preset, enter the return address, then copy the temporary address and title into SharePoint. Digest Bot receives the message via SMTP and sends the formatted digest back through Amazon SES.
+- **Workspace.** Upload a SharePoint `.eml` to preview and download it as a viewing copy or as an editable Outlook draft. The manual From and To settings apply to these downloads.
 
-Choose **Download .eml** to open the formatted message for viewing. Choose **Download editable draft** to compose and send it in Outlook. Outlook can apply a signature when it opens a draft. To turn that off, change the default signature for new messages in Outlook.
+## Deploy and test
 
-## Run locally
+Follow the [EC2 setup guide](deploy/EC2.md) to deploy Digest Bot at `digest.bond-sdc.com`, serve Service Desk Central on the same instance, and configure DNS, HTTPS and SES.
 
-Serve the static files using any HTTP server. From the repository root:
-
-```sh
-python3 -m http.server --bind 127.0.0.1 --directory dist 8000
-```
-
-Open `http://127.0.0.1:8000` in a browser.
+Run `npm ci` and `npm test` with Node.js 24+ to exercise the HTTP, SMTP, processing and export flows. The tests use an in-process delivery transport. To test just the manual interface, serve the `dist/` directory with a static web server.
 
 ## Formatting pipeline
 
-- `dist/app.js` handles browser interactions and preset storage.
-- `dist/core/digest.js` exposes `readDigest(bytes, document)` and `formatDigest(digest, preset, date, logo, { editable })`. The first uses a DOM-compatible document to extract SharePoint articles. The second serializes the formatted digest as a MIME email with the supplied logo embedded.
-- `dist/core/preset.js` defines the preset schema and defaults. `dist/core/render.js` renders the fixed Bond Staff News template and produces HTML and plain-text versions.
-
-A future mail service can pass received email bytes and a stored preset through the same pipeline, then hand the output to its mail transport.
+The browser workspace and mail worker share the parser, preset and email renderer in `dist/core/`. The EC2 process stores time-limited requests and queued messages in SQLite. The outgoing mail adapter uses the EC2 instance role.

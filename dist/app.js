@@ -1,4 +1,5 @@
 import { formatDigest, readDigest } from "./core/digest.js";
+import { mountEmailDelivery } from "./email-delivery.js";
 import { normaliseAddress } from "./core/mailbox.js";
 import { DEFAULT_PRESET, normalisePreset } from "./core/preset.js";
 import { renderDigest } from "./core/render.js";
@@ -10,6 +11,7 @@ const workspaceIntro = byId("workspace-intro");
 const workspaceControls = byId("workspace-controls");
 const editorIntro = byId("editor-intro");
 const grid = byId("work-grid");
+const emailView = byId("email-view");
 const form = byId("editor-form");
 const subjectField = form.elements.namedItem("subject");
 const fromField = form.elements.namedItem("from");
@@ -44,6 +46,7 @@ const example = {
 };
 
 let preset = loadPreset();
+const emailDelivery = mountEmailDelivery(() => preset, announce);
 let draft = { ...preset };
 let source = null;
 let logo = null;
@@ -110,10 +113,14 @@ function openScreen(next, scroll) {
   if (next === screen) return;
   screen = next;
   const editing = next === "editor";
-  workspaceIntro.hidden = editing;
-  workspaceControls.hidden = editing;
+  const emailing = next === "email";
+  workspaceIntro.hidden = next !== "workspace";
+  workspaceControls.hidden = next !== "workspace";
   editorIntro.hidden = !editing;
   form.hidden = !editing;
+  grid.hidden = emailing;
+  emailView.hidden = !emailing;
+  emailDelivery.setActive(emailing);
   grid.classList.toggle("editor-grid", editing);
   // Keep the preview mounted while switching screens so its document and scroll position survive.
   for (const link of document.querySelectorAll("[data-tab]")) {
@@ -326,15 +333,19 @@ byId("reset-preset").addEventListener("click", () => {
   writeForm(DEFAULT_PRESET);
   renderPreview();
 });
+function routeScreen() {
+  const page = location.hash.slice(1);
+  return ["editor", "email"].includes(page) ? page : "workspace";
+}
+
 window.addEventListener("hashchange", () => {
-  if (!location.hash || location.hash === "#workspace") openScreen("workspace", true);
-  if (location.hash === "#editor") openScreen("editor", true);
+  if (location.hash !== "#main") openScreen(routeScreen(), true);
 });
 
 writeForm(preset);
 syncPresetDetail();
 syncFileDetail();
-openScreen(location.hash === "#editor" ? "editor" : "workspace", false);
+openScreen(routeScreen(), false);
 // Keep the preview usable and retry the asset when downloading if this initial request fails.
 loadLogo().catch(() => {});
 loadExampleImages();

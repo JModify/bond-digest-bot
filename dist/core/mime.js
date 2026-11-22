@@ -148,21 +148,31 @@ function readParts(entity, result, depth = 0) {
   }
 }
 
-export function parseEmail(bytes) {
+function rawText(bytes) {
   // Use an identity byte-to-character mapping while splitting MIME parts.
   let raw = "";
   for (let offset = 0; offset < bytes.length; offset += 8192) {
     raw += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
   }
+  return raw.replace(/^\xef\xbb\xbf/, "");
+}
 
-  const entity = readEntity(raw.replace(/^\xef\xbb\xbf/, ""));
+function readSubject(headers) {
+  const value = headers.get("subject") ?? "";
+  const bytes = Uint8Array.from(value, (character) => character.charCodeAt(0));
+  const utf8Subject = decodeText(bytes, "utf-8");
+  return decodeHeader(utf8Subject.includes("�") ? decodeText(bytes, "windows-1252") : utf8Subject);
+}
+
+export function readEmailSubject(bytes) {
+  return readSubject(readEntity(rawText(bytes.subarray(0, 128 * 1024))).headers);
+}
+
+export function parseEmail(bytes) {
+  const entity = readEntity(rawText(bytes));
   if (!entity.headers.size) throw new Error("This file doesn’t look like an email. Choose a SharePoint .eml file.");
-  const encodedSubject = entity.headers.get("subject") ?? "";
-  const headerBytes = Uint8Array.from(encodedSubject, (character) => character.charCodeAt(0));
-  const utf8Subject = decodeText(headerBytes, "utf-8");
-  const subject = decodeHeader(utf8Subject.includes("�") ? decodeText(headerBytes, "windows-1252") : utf8Subject);
   const result = {
-    subject,
+    subject: readSubject(entity.headers),
     from: mailboxFromHeader(entity.headers.get("from")),
     replyTo: mailboxFromHeader(entity.headers.get("reply-to")),
     sender: mailboxFromHeader(entity.headers.get("sender")),
@@ -212,7 +222,7 @@ function emailPart(type, bytes, extra = []) {
   ].join(crlf);
 }
 
-export function serializeEmail({ subject, from, recipient, html, text, images }, date = new Date(), { editable = false } = {}) {
+export function serializeEmail({ subject, from, recipient, html, text, images }, date = new Date(), { editable = false, automatic = false } = {}) {
   const id = crypto.randomUUID();
   const alternative = "alt-" + id;
   const related = "rel-" + id;
@@ -229,6 +239,7 @@ export function serializeEmail({ subject, from, recipient, html, text, images },
   if (toAddress) lines.push("To: " + toAddress);
   // Opening a draft lets the mail client apply its compose settings.
   if (editable) lines.push("X-Unsent: 1");
+  if (automatic) lines.push("Auto-Submitted: auto-replied", "X-Auto-Response-Suppress: All");
   if (hasImages) {
     lines.push(`Content-Type: multipart/related; type="multipart/alternative"; boundary="${related}"`, "", boundary(related));
   }
