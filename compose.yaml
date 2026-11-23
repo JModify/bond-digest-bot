@@ -1,22 +1,68 @@
+name: bond-sdc
+
+x-smtp-certificate-dir: &smtp-certificate-dir caddy/certificates/acme-v02.api.letsencrypt.org-directory/mail.bond-sdc.com
+
 services:
+  service-desk-central:
+    build: ../bond-service-desk-central
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      DIGEST_AUTH_USER: ${DIGEST_AUTH_USER:-josh}
+      DIGEST_AUTH_HASH: ${DIGEST_AUTH_HASH:?Set DIGEST_AUTH_HASH in .env}
+      SMTP_CERTIFICATE_DIR: *smtp-certificate-dir
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test -s "/data/$$SMTP_CERTIFICATE_DIR/mail.bond-sdc.com.crt" &&
+          test -s "/data/$$SMTP_CERTIFICATE_DIR/mail.bond-sdc.com.key"
+      interval: 10s
+      timeout: 3s
+      start_period: 1m
+      retries: 24
+    logging:
+      driver: local
+
   digest-bot:
     build: .
+    depends_on:
+      service-desk-central:
+        condition: service_healthy
     init: true
     restart: unless-stopped
     stop_grace_period: 65s
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    env_file: .env
     environment:
+      AWS_REGION: ap-southeast-2
+      DIGEST_ALLOWED_RECIPIENTS: ${DIGEST_ALLOWED_RECIPIENTS:?Set DIGEST_ALLOWED_RECIPIENTS in .env}
       DIGEST_DATABASE: /data/digest.sqlite
-      DIGEST_TLS_DIR: /run/digest-tls
+      DIGEST_TLS_CERT_FILE: /run/digest-tls/mail.bond-sdc.com.crt
+      DIGEST_TLS_KEY_FILE: /run/digest-tls/mail.bond-sdc.com.key
     ports:
-      - "127.0.0.1:8080:8080"
-      - "0.0.0.0:25:2525"
+      - "25:2525"
     volumes:
-      - ./var/data:/data
-      - ./var/smtp-tls:/run/digest-tls:ro
+      - type: bind
+        source: ./var/data
+        target: /data
+        bind:
+          create_host_path: false
+      - type: volume
+        source: caddy-data
+        target: /run/digest-tls
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: *smtp-certificate-dir
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
       interval: 30s
@@ -24,3 +70,7 @@ services:
       retries: 3
     logging:
       driver: local
+
+volumes:
+  caddy-data:
+  caddy-config:
