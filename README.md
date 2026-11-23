@@ -1,16 +1,17 @@
-# Digest Bot v1.0.3
+# Digest Bot v1.0.4
 
-Digest Bot formats SharePoint news emails using the Bond Staff News layout.
+Digest Bot formats SharePoint news digests in the Bond Staff News layout.
 
-- **Email delivery.** Save the subject preset, enter the return address, then copy the temporary address and title into SharePoint. Digest Bot receives the message via SMTP and sends the formatted digest back through Amazon SES.
-- **Workspace.** Upload a SharePoint `.eml` to preview and download it as a viewing copy or as an editable Outlook draft. The manual From and To settings apply to these downloads.
+1. In SharePoint, choose **Email a news digest** and send it to your Bond inbox.
+2. In new Outlook, save the received message with **More actions → Save as**. Drop the `.eml` file into Digest Bot or choose it with the file picker.
+3. Choose **Download .eml**, open the file in Outlook and select **Forward**. The file has `bondstaffnews@bond.edu.au` as its From header and leaves the recipient blank. Select a sender and recipients in Outlook as needed.
+
+The standard layout and Brisbane-date subject apply to every file. The browser reads and formats the email locally. [Opening a saved .eml in new Outlook](https://support.microsoft.com/en-us/outlook/mail/open-eml-msg-and-oft-files-in-new-outlook-and-outlook-on-the-web)
 
 ## Deploy and test
 
-Follow the [EC2 setup guide](deploy/EC2.md) to run both applications with one Docker Compose project. The Service Desk Central container serves the public site and manages HTTPS. The Digest Bot container runs the web app, the incoming mail listener and the Amazon SES delivery worker.
+Follow the [EC2 setup guide](deploy/EC2.md) to run Service Desk Central and Digest Bot with Docker Compose. To run Digest Bot on its own, use `npm start` on Node.js 24+ and open `http://localhost:8080`.
 
-Run `npm ci` and `npm test` with Node.js 24+ to exercise the HTTP, SMTP, processing and export flows. The tests use an in-process delivery transport. To test just the manual interface, serve the `dist/` directory with a static web server.
+Run `npm ci` and `npm test` to exercise the manual export, HTTP and retained email-delivery flows. The tests use an in-process delivery transport.
 
-## Formatting pipeline
-
-The browser workspace and mail worker share the parser, preset and email renderer in `dist/core/`. The EC2 process stores time-limited requests and queued messages in SQLite. The outgoing mail adapter uses the EC2 instance role.
+[Email delivery infrastructure](deploy/email-delivery.md) is retained for future use and disabled in the standard deployment.

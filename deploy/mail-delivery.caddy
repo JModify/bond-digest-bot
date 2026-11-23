@@ -1,0 +1,4 @@
+# Caddy issues the certificate Digest Bot uses for SMTP STARTTLS.
+mail.bond-sdc.com {
+	respond 404
+}

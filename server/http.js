@@ -52,6 +52,9 @@ export function createWebServer(config, store, log = console) {
     res.setHeader("X-Content-Type-Options", "nosniff");
 
     if (path === "/healthz" && isRead) return json(res, 200, { ok: true });
+    if (!config.emailDeliveryEnabled && (path === "/api/email" || path.startsWith("/api/email/"))) {
+      return json(res, 404, { message: "Page not found." });
+    }
     if (path === "/api/email" && isRead) return json(res, 200, { from: config.from });
     if (path === "/api/email/requests" && req.method === "POST") {
       if (req.headers.origin !== config.origin) return json(res, 403, { message: "Open Digest Bot at its configured address." });

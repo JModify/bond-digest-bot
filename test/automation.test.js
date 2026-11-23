@@ -2,19 +2,23 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import net from "node:net";
+import { JSDOM } from "jsdom";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { formatDigest } from "../dist/core/digest.js";
+import { formatDigest, readDigest } from "../dist/core/digest.js";
 import { parseEmail } from "../dist/core/mime.js";
+import { DEFAULT_PRESET } from "../dist/core/preset.js";
+import { loadConfig } from "../server/config.js";
 import { startDeliveryWorker } from "../server/delivery.js";
 import { createWebServer } from "../server/http.js";
 import { createSmtpServer } from "../server/smtp.js";
 import { openStore } from "../server/store.js";
 
 const config = {
+  emailDeliveryEnabled: true,
   origin: "https://digest.bond-sdc.com",
   inboxDomain: "inbox.bond-sdc.com",
   mailHost: "mail.bond-sdc.com",
@@ -98,7 +102,7 @@ test("creates a private request, accepts matching SMTP mail and delivers the sav
   });
 
   const base = "http://127.0.0.1:" + web.address().port;
-  assert.match(await (await fetch(base)).text(), /v1\.0\.3/);
+  assert.match(await (await fetch(base)).text(), /v1\.0\.4/);
   assert.equal((await (await fetch(base + "/api/email")).json()).from, config.from);
   const create = (payload, origin = config.origin) => fetch(base + "/api/email/requests", {
     method: "POST",
@@ -188,4 +192,42 @@ test("manual export still supports viewing and editable drafts", () => {
   assert.match(draft, /\r\nX-Unsent: 1\r\n/);
   assert.doesNotMatch(view, /\r\nX-Unsent:|\r\nAuto-Submitted:/);
   assert.match(parseEmail(Buffer.from(draft)).html, /Test story/);
+});
+
+test("manual export uses the Staff News sender and leaves the recipient blank", () => {
+  const { window } = new JSDOM();
+  try {
+    const digest = readDigest(Buffer.from(sourceDigest), window.document, { inferRecipient: false });
+    const eml = formatDigest(digest, DEFAULT_PRESET, new Date("2026-11-19T22:15:00Z"));
+    const message = parseEmail(Buffer.from(eml));
+    assert.equal(message.from, "bondstaffnews@bond.edu.au");
+    assert.equal(message.subject, "Bond Staff News | Friday 20 November 2026");
+    assert.match(message.html, /Test story/);
+    assert.doesNotMatch(eml, /\r\n(?:To|X-Unsent):/i);
+  } finally {
+    window.close();
+  }
+});
+
+test("default deployment serves the formatter with email delivery inaccessible", async (t) => {
+  const config = loadConfig({});
+  assert.equal(config.emailDeliveryEnabled, false);
+  const web = createWebServer(config).listen(0, "127.0.0.1");
+  await once(web, "listening");
+  t.after(() => new Promise((resolve) => web.close(resolve)));
+
+  const base = "http://127.0.0.1:" + web.address().port;
+  const page = await (await fetch(base + "/#email")).text();
+  assert.match(page, /Drop your \.eml file here/);
+  assert.doesNotMatch(page, /Email delivery|delivery-form|editor-form|data-tab/);
+  assert.equal((await fetch(base + "/healthz")).status, 200);
+  assert.equal((await fetch(base + "/email-delivery.js")).status, 404);
+  assert.equal((await fetch(base + "/api/email")).status, 404);
+  assert.equal((await fetch(base + "/api/email/requests/" + "0".repeat(32))).status, 404);
+  const start = await fetch(base + "/api/email/requests", {
+    method: "POST",
+    headers: { Origin: config.origin, "Content-Type": "application/json" },
+    body: JSON.stringify({ recipient: "staff@example.org" }),
+  });
+  assert.equal(start.status, 404);
 });

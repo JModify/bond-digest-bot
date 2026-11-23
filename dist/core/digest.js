@@ -5,9 +5,10 @@ import { extractSharePointDigest } from "./sharepoint.js";
 
 const automatedSender = /^(?:no[._-]?reply|do[._-]?not[._-]?reply)(?:[+._-]|@)/i;
 
-export function readDigest(bytes, document) {
+export function readDigest(bytes, document, { inferRecipient = true } = {}) {
   const email = parseEmail(bytes);
   const digest = extractSharePointDigest(email, document);
+  if (!inferRecipient) return digest;
   const suggestedRecipient = [email.from, email.replyTo, email.sender].find((address) =>
     address && address.toLowerCase() !== DEFAULT_PRESET.from && !automatedSender.test(address),
   ) || "";

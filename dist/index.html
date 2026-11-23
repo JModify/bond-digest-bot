@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Format SharePoint news digests with a saved preset and download a new email.">
+  <meta name="description" content="Format a SharePoint news digest and download it for Outlook.">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <meta name="theme-color" content="#F4F7FB">
+  <meta name="theme-color" content="#f4f7fc">
   <title>Digest Bot · Service Desk Central</title>
   <link rel="icon" href="mark.png" type="image/png">
   <link rel="stylesheet" href="styles.css">
@@ -15,226 +15,64 @@
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="topbar">
     <div class="shell topbar-inner">
-      <a class="wordmark" href="#workspace" aria-label="Digest Bot workspace">
-        <span class="brand-mark"><i class="icon icon-mail" aria-hidden="true"></i></span>
-        <span class="wordmark-text"><strong>Digest Bot</strong><span>Service Desk Central</span></span>
-      </a>
-      <nav class="main-nav" aria-label="Digest Bot">
-        <a href="#workspace" data-tab="workspace" aria-current="page"><i class="icon icon-grid" aria-hidden="true"></i>Workspace</a>
-        <a href="#editor" data-tab="editor"><i class="icon icon-edit" aria-hidden="true"></i>Digest editor</a>
-        <a href="#email" data-tab="email"><i class="icon icon-mail" aria-hidden="true"></i>Email delivery</a>
-      </nav>
-      <span class="version">v1.0.3</span>
+      <div class="wordmark">
+        <img src="mark.png" width="42" height="42" alt="">
+        <div><strong>Digest Bot</strong><span>Service Desk Central</span></div>
+      </div>
+      <span class="privacy-note"><i class="icon icon-lock" aria-hidden="true"></i> Processed in your browser</span>
     </div>
   </header>
 
-  <main class="shell" id="main" tabindex="-1">
-    <section id="workspace-intro" aria-labelledby="workspace-title">
-      <div class="hero">
-        <div class="hero-copy">
-          <p class="hero-context"><i class="icon icon-mail" aria-hidden="true"></i> SharePoint news digest</p>
-          <h1 id="workspace-title">Format a <span>news digest</span></h1>
-          <p>Format a SharePoint news email and download it as a ready-to-open .eml file.</p>
-        </div>
-        <div class="hero-art" aria-hidden="true">
-          <div class="art-ring art-ring-one"></div>
-          <div class="art-ring art-ring-two"></div>
-          <div class="art-paper art-paper-back"></div>
-          <div class="art-paper art-paper-front">
-            <div class="art-heading"><b></b><b></b><b></b></div>
-            <div class="art-story"><span></span><div><b></b><b></b><b></b></div></div>
-            <div class="art-story"><span></span><div><b></b><b></b><b></b></div></div>
-          </div>
-          <div class="art-envelope"><i class="icon icon-mail"></i></div>
-          <b class="art-star art-star-one"></b>
-          <b class="art-star art-star-two"></b>
-        </div>
-      </div>
-    </section>
-
-    <section class="editor-intro" id="editor-intro" aria-labelledby="editor-title" hidden>
-      <div>
-        <h1 id="editor-title">Digest editor</h1>
-        <p>Save the subject line and email addresses for your digests.</p>
-      </div>
-      <a class="button button-secondary" href="#workspace">Back to workspace</a>
-    </section>
-
-    <div class="work-grid" id="work-grid">
-      <div class="work-controls" id="workspace-controls">
-        <section class="panel upload-panel" aria-labelledby="upload-title">
-          <div class="panel-heading">
-            <span class="heading-icon"><i class="icon icon-upload" aria-hidden="true"></i></span>
-            <div>
-              <h2 id="upload-title">Source email</h2>
-              <p>Use the .eml saved from your SharePoint digest.</p>
-            </div>
-          </div>
-          <div class="drop-zone" id="drop-zone">
-            <input type="file" accept=".eml,message/rfc822" id="file-input" hidden>
-            <div id="drop-empty">
-              <p class="drop-title">Drag and drop your .eml here</p>
-              <button type="button" class="button button-secondary" id="choose-file"><i class="icon icon-folder" aria-hidden="true"></i> Choose file</button>
-            </div>
-            <div class="file-detail" id="file-detail" hidden>
-              <span class="file-detail-icon"><i class="icon icon-mail" aria-hidden="true"></i></span>
-              <div class="file-detail-text">
-                <p class="drop-title" id="file-name"></p>
-                <p class="muted" id="file-meta"></p>
-              </div>
-              <div class="file-actions">
-                <button type="button" class="button button-quiet" id="replace-file">Replace</button>
-                <button type="button" class="button button-quiet icon-button" aria-label="Remove source email" title="Remove source email" id="remove-file"><i class="icon icon-close" aria-hidden="true"></i></button>
-              </div>
-            </div>
-          </div>
-          <p class="error" id="file-error" role="alert" hidden></p>
-          <p class="file-loading muted" id="file-loading" role="status" hidden>Reading email…</p>
-        </section>
-
-        <section class="panel preset-panel" aria-labelledby="preset-title">
-          <div class="panel-heading">
-            <span class="heading-icon"><i class="icon icon-edit" aria-hidden="true"></i></span>
-            <div>
-              <h2 id="preset-title">Formatting preset</h2>
-              <p id="preset-detail">Default subject line</p>
-            </div>
-          </div>
-          <a class="button button-secondary" href="#editor">Edit preset</a>
-        </section>
-
-        <section class="panel output-panel" aria-labelledby="output-title">
-          <div class="panel-heading">
-            <span class="heading-icon"><i class="icon icon-download" aria-hidden="true"></i></span>
-            <div>
-              <h2 id="output-title">Formatted email</h2>
-              <p id="download-detail">Add a source email to enable download.</p>
-            </div>
-          </div>
-          <div class="download-actions">
-            <button class="button button-primary" type="button" id="download" disabled><i class="icon icon-download" aria-hidden="true"></i> Download .eml</button>
-            <button class="button button-secondary" type="button" id="download-draft" aria-describedby="draft-help" disabled>Download editable draft</button>
-          </div>
-          <p class="field-help draft-help" id="draft-help">Editable drafts follow Outlook’s signature settings.</p>
-        </section>
-      </div>
-
-      <form class="panel editor-panel" id="editor-form" aria-labelledby="editor-title" hidden>
-        <label class="field">Subject line
-          <input type="text" name="subject" aria-describedby="subject-help" maxlength="300">
-        </label>
-        <p class="field-help" id="subject-help">Date placeholders insert today’s date in Brisbane.</p>
-
-        <label class="field address-field">From address
-          <input type="email" name="from" autocomplete="off" maxlength="254" aria-describedby="from-help">
-        </label>
-        <p class="field-help" id="from-help">For .eml downloads. Automatic delivery uses the server’s verified sender.</p>
-
-        <label class="field address-field">
-          <span>To address <span class="optional">Optional</span></span>
-          <input type="email" name="recipient" placeholder="name@example.com" aria-describedby="recipient-help" autocomplete="off" maxlength="254">
-        </label>
-        <p class="field-help" id="recipient-help">Fills from the uploaded email’s sender. Clear a custom address to use autofill again.</p>
-
-        <div class="editor-actions">
-          <button type="button" class="button button-quiet" id="reset-preset">Reset to defaults</button>
-          <div class="save-actions">
-            <span id="draft-status" class="draft-status"></span>
-            <button type="submit" class="button button-primary">Save preset</button>
-          </div>
-        </div>
-      </form>
-
-      <div class="preview-slot">
-        <section class="panel preview-panel" id="preview-panel" aria-labelledby="preview-title">
-          <div class="preview-heading">
-            <div class="panel-heading">
-              <span class="heading-icon"><i class="icon icon-mail" aria-hidden="true"></i></span>
-              <div>
-                <h2 id="preview-title">Digest preview</h2>
-                <p id="preview-caption">Previewing the saved preset</p>
-              </div>
-            </div>
-            <span class="source-label" id="preview-source">Example articles</span>
-          </div>
-          <div class="email-pane">
-            <dl class="email-meta">
-              <div><dt>Subject</dt><dd id="preview-subject"></dd></div>
-              <div><dt>From</dt><dd id="preview-from"></dd></div>
-              <div id="preview-recipient-row" hidden><dt>To</dt><dd id="preview-recipient"></dd></div>
-            </dl>
-            <iframe id="email-preview" sandbox="" title="Formatted email preview" referrerpolicy="no-referrer"></iframe>
-          </div>
-        </section>
-      </div>
+  <main class="workspace-shell" id="main" tabindex="-1">
+    <div class="intro">
+      <h1>Format a news digest</h1>
+      <p>In SharePoint, email a news digest to your Bond inbox. Then add the saved email here.</p>
     </div>
 
-    <section id="email-view" aria-labelledby="email-title" hidden>
-      <div class="editor-intro">
-        <div>
-          <h1 id="email-title">Email delivery</h1>
-          <p>Send a SharePoint news digest to Digest Bot and get the formatted email back automatically.</p>
+    <section class="workspace panel" aria-label="Format an email file">
+      <noscript><p class="error">Enable JavaScript to format an email in your browser.</p></noscript>
+      <input type="file" accept=".eml,message/rfc822" id="file-input" hidden>
+      <div class="drop-zone" id="drop-zone" aria-busy="false">
+        <span class="drop-icon" aria-hidden="true"><i id="drop-icon" class="icon icon-upload"></i></span>
+        <div class="drop-copy">
+          <h2 id="drop-title">Drop your .eml file here</h2>
+          <p id="file-meta" hidden></p>
         </div>
-        <a class="button button-secondary" href="#workspace">Back to workspace</a>
+        <div class="file-actions">
+          <button class="button button-secondary" type="button" id="choose-file">
+            <i class="icon icon-folder" aria-hidden="true"></i><span id="choose-label">Choose file</span>
+          </button>
+          <button class="button button-quiet" type="button" id="remove-file" hidden>Remove</button>
+        </div>
       </div>
+      <p class="feedback visually-hidden" id="file-status" role="status"></p>
+      <p class="error" id="file-error" role="alert" hidden></p>
+      <p class="outlook-help" id="save-help">
+        <i class="icon icon-info" aria-hidden="true"></i>
+        <span>In new Outlook, open the digest and choose <strong>More actions → Save as</strong> to get the <code>.eml</code> file.</span>
+      </p>
 
-      <div class="delivery-grid">
-        <section class="panel delivery-panel" aria-labelledby="delivery-title">
-          <div class="panel-heading">
-            <span class="heading-icon"><i class="icon icon-mail" aria-hidden="true"></i></span>
-            <div>
-              <h2 id="delivery-title">Send a digest</h2>
-              <p id="delivery-availability" role="status">Checking email delivery…</p>
-            </div>
-          </div>
-
-          <form id="delivery-form" hidden>
-            <label class="field address-field">Return email address
-              <input id="delivery-recipient" name="recipient" type="email" required maxlength="254" autocomplete="email" placeholder="name@bond.edu.au" aria-describedby="delivery-recipient-help">
-            </label>
-            <p class="field-help" id="delivery-recipient-help">The formatted digest will go to this address.</p>
-            <button class="button button-primary" id="start-delivery" type="submit">Start email delivery</button>
-          </form>
-          <p class="error" id="delivery-error" role="alert" hidden></p>
-
-          <div class="delivery-request" id="delivery-request" hidden>
-            <p class="delivery-state" id="delivery-state" role="status"></p>
-            <p class="field-help wrap-anywhere" id="delivery-return"></p>
-            <div id="delivery-sharepoint">
-              <p class="delivery-instructions">In SharePoint, choose <strong>Email a news digest</strong> and enter these values.</p>
-              <label class="field" for="delivery-inbox">To</label>
-              <div class="copy-field">
-                <input id="delivery-inbox" type="text" readonly>
-                <button class="button button-secondary" type="button" data-copy="delivery-inbox">Copy address</button>
-              </div>
-              <label class="field" for="delivery-code">Title</label>
-              <div class="copy-field">
-                <input id="delivery-code" type="text" readonly>
-                <button class="button button-secondary" type="button" data-copy="delivery-code">Copy title</button>
-              </div>
-              <p class="field-help" id="delivery-expiry"></p>
-            </div>
-            <button class="button button-secondary" id="delivery-reset" type="button" hidden>Start another digest</button>
-          </div>
-        </section>
-
-        <section class="panel delivery-panel" id="delivery-settings" aria-labelledby="delivery-settings-title" hidden>
-          <div class="panel-heading">
-            <span class="heading-icon"><i class="icon icon-edit" aria-hidden="true"></i></span>
-            <div>
-              <h2 id="delivery-settings-title">Formatting preset</h2>
-              <p>Changes to your preset apply to the next request.</p>
-            </div>
-          </div>
-          <dl class="delivery-meta">
-            <div><dt>Subject line</dt><dd id="delivery-subject"></dd></div>
-            <div><dt>Sending address</dt><dd id="delivery-from"></dd></div>
-          </dl>
-          <a class="button button-secondary" href="#editor">Edit preset</a>
-        </section>
-      </div>
+      <section class="download-area" id="result" aria-labelledby="result-title" hidden>
+        <div>
+          <h2 id="result-title">Your formatted email is ready</h2>
+          <p>Open the downloaded file in Outlook and choose <strong>Forward</strong>.</p>
+        </div>
+        <a class="button button-primary" id="download" draggable="false">
+          <i class="icon icon-download" aria-hidden="true"></i> Download .eml
+        </a>
+      </section>
     </section>
+
+    <details class="preview panel" id="preview" hidden>
+      <summary>Preview formatted email</summary>
+      <dl class="email-meta">
+        <div><dt>Subject</dt><dd id="preview-subject"></dd></div>
+        <div><dt>From</dt><dd id="preview-from"></dd></div>
+      </dl>
+      <iframe id="email-preview" sandbox="" title="Formatted email" referrerpolicy="no-referrer"></iframe>
+    </details>
+
+    <footer class="version" aria-label="Version">v1.0.4</footer>
   </main>
-  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

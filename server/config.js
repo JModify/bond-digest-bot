@@ -20,6 +20,10 @@ export function loadConfig(env = process.env) {
   if (origin.protocol !== "https:" || origin.href !== origin.origin + "/") {
     throw new Error("DIGEST_PUBLIC_ORIGIN must be an HTTPS origin without a path.");
   }
+  const emailDeliveryEnabled = env.DIGEST_EMAIL_DELIVERY_ENABLED === "true";
+  const webConfig = { origin: origin.origin, emailDeliveryEnabled };
+  if (!emailDeliveryEnabled) return webConfig;
+
   const allowedRecipients = list(env.DIGEST_ALLOWED_RECIPIENTS);
   const recipientDomains = list(env.DIGEST_ALLOWED_RECIPIENT_DOMAINS);
   if (!allowedRecipients.length && !recipientDomains.length) {
@@ -36,7 +40,7 @@ export function loadConfig(env = process.env) {
   }
   const tlsDir = env.DIGEST_TLS_DIR ?? "./var/smtp-tls";
   return {
-    origin: origin.origin,
+    ...webConfig,
     inboxDomain: hostname(env.DIGEST_INBOX_DOMAIN ?? "inbox.bond-sdc.com", "DIGEST_INBOX_DOMAIN"),
     mailHost: hostname(env.DIGEST_MAIL_HOST ?? "mail.bond-sdc.com", "DIGEST_MAIL_HOST"),
     from,
