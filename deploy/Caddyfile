@@ -1,0 +1,35 @@
+{
+	email {$ACME_EMAIL}
+	# Compose mounts the mail certificate from this issuer's storage directory.
+	cert_issuer acme https://acme-v02.api.letsencrypt.org/directory
+}
+
+bond-sdc.com {
+	root * /usr/share/caddy
+	file_server
+}
+
+www.bond-sdc.com {
+	redir https://bond-sdc.com{uri} permanent
+}
+
+digest.bond-sdc.com {
+	basic_auth {
+		{$DIGEST_AUTH_USER} {$DIGEST_AUTH_HASH}
+	}
+	request_body {
+		max_size 16KiB
+	}
+	header {
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy same-origin
+	}
+	reverse_proxy digest-bot:8080 {
+		header_up -Authorization
+	}
+}
+
+# Caddy issues the certificate here. Digest Bot uses it for SMTP STARTTLS.
+mail.bond-sdc.com {
+	respond 404
+}

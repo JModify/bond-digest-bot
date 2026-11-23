@@ -1,164 +1,194 @@
-# Deploy Digest Bot and Service Desk Central on EC2
+# Deploy Service Desk Central and Digest Bot on AWS EC2
 
-This setup uses one Ubuntu EC2 instance in Sydney. Nginx serves the landing page and protects Digest Bot with HTTPS and a login. Digest Bot receives SMTP on port 25, queues valid SharePoint messages, and delivers the formatted digest through Amazon SES over HTTPS. The site still supports manual `.eml` upload and download.
+Run both apps on one Ubuntu server in **Asia Pacific (Sydney)** (`ap-southeast-2`). Docker Compose builds their images and starts them together. You’ll use the AWS console, your domain’s DNS settings and PowerShell on your computer.
 
-| Purpose | Address |
-| --- | --- |
-| Service Desk Central | `https://bond-sdc.com/` |
-| Digest Bot | `https://digest.bond-sdc.com/` |
-| Temporary SharePoint recipient | `digest-<request-id>@inbox.bond-sdc.com` |
-| SMTP hostname | `mail.bond-sdc.com` |
-| Automated From address | `digest@bond-sdc.com` |
-
-## 1. Launch EC2 and allocate an Elastic IP
-
-In the [EC2 console](https://console.aws.amazon.com/ec2/), select **Asia Pacific (Sydney)** (`ap-southeast-2`). Launch an **Ubuntu Server 24.04 LTS** x86_64 instance. A **t3.small** with a **20 GiB encrypted gp3** root volume is a reasonable starting point for the two sites and the mail queue. Use a public subnet with a route to an internet gateway.
-
-Allocate and associate an **Elastic IP** with the instance. Use it as `YOUR_ELASTIC_IPV4` throughout this guide. In **Advanced details**, require **IMDSv2**, keep the metadata endpoint enabled, and set the metadata response hop limit to **2** so the app container can use the instance role.
-
-Create or attach a security group with these IPv4 inbound rules. The default outbound rules work for setup and SES. [EC2 security group rules](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/security-group-rules-reference.html) · [Elastic IP addresses](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/elastic-ip-addresses-eip.html) · [Instance metadata settings](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-options.html)
-
-| TCP port | Source | Use |
+| Container | What it does | Public address |
 | --- | --- | --- |
-| 22 | Your public IPv4 address with `/32` | SSH administration |
-| 80 | `0.0.0.0/0` | Certificate validation and HTTP redirects |
-| 443 | `0.0.0.0/0` | The websites |
-| 25 | `0.0.0.0/0` | Incoming SMTP with STARTTLS |
+| `service-desk-central` | Caddy serves the static site, obtains and renews TLS certificates, and forwards the password-protected Digest Bot website to its container. | `https://bond-sdc.com` and `https://www.bond-sdc.com` |
+| `digest-bot` | Node.js serves the Digest Bot interface, receives SharePoint mail over SMTP, stores requests in SQLite and sends formatted replies through Amazon SES. | `https://digest.bond-sdc.com` via Caddy. Mail arrives at `mail.bond-sdc.com` on port `25`. |
 
-The app's HTTP port 8080 listens on host loopback. Incoming mail uses port 25 and replies use the SES API over port 443. Your EC2 instance can keep AWS’s default outbound SMTP restriction. [AWS port 25 restrictions](https://repost.aws/knowledge-center/ec2-port-25-throttle)
+Caddy publishes ports `80` and `443`. Digest Bot publishes port `25` for inbound mail. Its web server is reachable by Caddy over Docker’s private network. Caddy renews the mail certificate automatically, and Digest Bot loads the renewed certificate for new SMTP connections. The SQLite data lives in `var/data` on the server.
 
-## 2. Publish DNS records
+## Before you start
 
-Use the DNS provider for `bond-sdc.com`. If it is Cloudflare, set the A records to **DNS only**. Replace `YOUR_ELASTIC_IPV4` with the associated address. Start with a TTL of 300 seconds where supported.
+- Sign in to [AWS](https://console.aws.amazon.com/) with an administrator account. For a new AWS account, [set up MFA and an administrator sign-in](https://docs.aws.amazon.com/IAM/latest/UserGuide/getting-started-account-iam.html).
+- Have access to the DNS settings for `bond-sdc.com` and a return email address you can verify for the first digest test.
+- On Windows, check that `Get-Command ssh` works in PowerShell. Other systems with an SSH client can use the same Ubuntu commands after connecting.
+- EC2, storage, public IPv4 and SES usage can incur charges. Check the [AWS Pricing Calculator](https://calculator.aws/) and [public IPv4 pricing](https://aws.amazon.com/vpc/pricing/).
 
-| Type | Name | Value | When |
+## 1. Create the EC2 server
+
+1. Open the [EC2 console](https://console.aws.amazon.com/ec2/) and select **Asia Pacific (Sydney)** in the region menu. Go to **Instances → Launch instances**.
+2. Enter `bond-sdc` for the name. Choose **Ubuntu Server 24.04 LTS** from Canonical, **64-bit (x86)**, and instance type `t3.small`.
+3. Under **Key pair**, choose **Create new key pair**. Name it `bond-sdc`, select **RSA** and **.pem**, and keep the downloaded `bond-sdc.pem` private. You’ll use it to sign in to Ubuntu.
+4. Under **Network settings → Edit**, choose the default VPC and a default subnet. Enable **Auto-assign public IP**. Create a security group, which is the server’s AWS firewall, with the inbound rules below. Leave the default outbound rules in place.
+
+| Type | Port | Source | Purpose |
 | --- | --- | --- | --- |
-| A | `@` | `YOUR_ELASTIC_IPV4` | Before requesting certificates |
-| A | `www` | `YOUR_ELASTIC_IPV4` | Before requesting certificates |
-| A | `digest` | `YOUR_ELASTIC_IPV4` | Before requesting certificates |
-| A | `mail` | `YOUR_ELASTIC_IPV4` | Before requesting certificates |
-| MX | `inbox` | `mail.bond-sdc.com` with priority **10** | After the SMTP listener is running |
-| CNAME | Three names supplied by SES | The matching targets supplied by SES | As part of the SES identity setup |
+| SSH | 22 | **My IP** | Your terminal |
+| HTTP | 80 | **Anywhere-IPv4** | Certificate validation and redirects |
+| HTTPS | 443 | **Anywhere-IPv4** | Both websites |
+| Custom TCP | 25 | **Anywhere-IPv4** | Incoming SharePoint email |
 
-The MX record is for `inbox.bond-sdc.com`. The root domain can keep any existing mail records. SES handles the return path for outgoing mail. If you already have DNS records for the website hostnames, update them at cutover. [Cloudflare DNS proxy status](https://developers.cloudflare.com/dns/proxy-status/)
+5. Set storage to **20 GiB gp3** and enable encryption. Under **Advanced details**, enable the instance metadata service, select **V2 only (token required)** and set **Metadata response hop limit** to `2`. This lets the Digest Bot container obtain temporary SES credentials from the EC2 role.
+6. Choose **Launch instance**. Wait for the instance to show **Running** and pass its status checks.
+7. In the EC2 sidebar go to **Elastic IPs → Allocate Elastic IP address → Allocate**. Select the new address and choose **Actions → Associate Elastic IP address**. Pick the `bond-sdc` instance and choose **Associate**. Copy the Elastic IP. Use it for DNS and SSH so the address survives a stop and start of the instance.
 
-## 3. Set up SES and attach an EC2 role
+[AWS launch settings](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-launch-parameters.html) · [Metadata options for containers](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-IMDS-new-instances.html) · [Elastic IPs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/working-with-eips.html)
 
-1. In the [Amazon SES console](https://console.aws.amazon.com/ses/), stay in **Sydney** and choose **Verified identities → Create identity → Domain**. Enter `bond-sdc.com` and choose **Easy DKIM**. Publish the three displayed CNAMEs, then wait for identity verification.
-2. For an initial sandbox test, add your return mailbox as a verified email address in Sydney and use its verification link. For use with other approved return mailboxes, choose **Account dashboard → Request production access**. Describe it as transactional mail sent to staff who request a digest, and include the handling of bounces and complaints in your request.
-3. In Amazon SNS, create a Standard topic in Sydney and subscribe a monitored email address. Confirm the subscription. In SES, open the verified domain’s **Notifications** tab and set the feedback notifications for **Bounce** and **Complaint** to that topic. Review these notifications before resending to a failed address.
-4. In IAM, create a role using the **EC2** use case and the `deploy/iam-ses-send.template.json` inline permissions policy. Replace `YOUR_AWS_ACCOUNT_ID` with your 12-digit AWS account ID. The policy permits sending from `digest@bond-sdc.com` to the `bond.edu.au` domain. Restrict its recipients further if you only need individual mailboxes. If you use a different return domain, update both the policy and the application allowlist.
-5. Attach the instance profile from **EC2 → Instances → Actions → Security → Modify IAM role**. The SDK uses the role’s temporary credentials.
+## 2. Point the domains to EC2
 
-[SES domain verification](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html) · [SES sandbox and production access](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html) · [SES permissions](https://docs.aws.amazon.com/ses/latest/dg/control-user-access.html) · [Bounce and complaint notifications](https://docs.aws.amazon.com/ses/latest/dg/configure-sns-notifications.html) · [Attach an EC2 IAM role](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/attach-iam-role.html)
+At your DNS provider, add the following **A** records, each with your EC2 Elastic IP as the value. If a record already exists, update it when you’re ready for EC2 to take over that hostname. With Cloudflare, set these records to **DNS only**. If any of the four hostnames has an old **AAAA** record, clear it when cutting over to this IPv4-only server.
 
-## 4. Install both applications on the instance
+| Name | Full hostname | Value |
+| --- | --- | --- |
+| `@` | `bond-sdc.com` | EC2 Elastic IP |
+| `www` | `www.bond-sdc.com` | EC2 Elastic IP |
+| `digest` | `digest.bond-sdc.com` | EC2 Elastic IP |
+| `mail` | `mail.bond-sdc.com` | EC2 Elastic IP |
 
-From your SSH client:
+The inbox MX record goes in Step 6, once Digest Bot can accept mail.
 
-```bash
-ssh -i ~/.ssh/bond-sdc.pem ubuntu@YOUR_ELASTIC_IPV4
+## 3. Connect and install Docker
+
+In **Windows PowerShell**, run the commands below. Adjust the key path if you saved the file somewhere else.
+
+```powershell
+$Ec2Key = "$HOME\Downloads\bond-sdc.pem"
+$Ec2Ip = Read-Host "Enter your EC2 Elastic IP"
+ssh -i $Ec2Key "ubuntu@$Ec2Ip"
 ```
 
-Run the rest on EC2. The commands use Ubuntu’s Docker and Compose packages. If you already installed Docker from Docker’s apt repository, use its Compose plugin and omit `docker.io` and `docker-compose-v2` from the package list. [Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
+On first connection, check the host key fingerprint against **EC2 → Instances → your instance → Actions → Monitor and troubleshoot → Get system log**, then enter `yes` when the fingerprints match. After you see a prompt starting with `ubuntu@`, run the following in **Ubuntu over SSH**.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates git nginx apache2-utils certbot dnsutils docker.io docker-compose-v2
-sudo systemctl enable --now docker nginx
-
-sudo git clone https://github.com/JModify/bond-digest-bot.git /opt/digest-bot
-sudo git clone https://github.com/JModify/bond-service-desk-central.git /opt/service-desk-central
-sudo install -d -m 0755 /var/www/service-desk-central /var/www/acme
-sudo install -m 0644 /opt/service-desk-central/index.html /opt/service-desk-central/styles.css /opt/service-desk-central/network-switch.webp /opt/service-desk-central/service-desk-mark.svg /var/www/service-desk-central/
-
-cd /opt/digest-bot
-sudo install -m 0600 deploy/digest.env.example .env
-sudoedit /opt/digest-bot/.env
-sudo install -d -m 0700 -o 1000 -g 1000 /opt/digest-bot/var/data
+sudo apt-get install -y docker.io docker-compose-v2 docker-buildx git dnsutils openssl nano
+sudo systemctl enable --now docker
+sudo docker version --format '{{.Server.Version}}'
+sudo docker compose version
 ```
 
-In `.env`, replace `your.name@bond.edu.au` with the actual address you verified or want to allow. Use a comma-separated list for multiple exact mailboxes. Leave `DIGEST_ALLOWED_RECIPIENT_DOMAINS` blank for an exact allowlist. `DIGEST_SHAREPOINT_HOSTS` defaults to `bonduni.sharepoint.com` and can contain multiple exact hostnames.
+Use current Ubuntu 24.04 packages. The stack needs Docker Engine 26 or later and Compose 2.39 or later for the certificate mount. If your packages are older, use [Docker’s Ubuntu installation instructions](https://docs.docker.com/engine/install/ubuntu/).
 
-Add a username and password for Digest Bot. `-c` creates the password file on the first run. Use `sudo htpasswd -B /etc/nginx/digest-users another-user` for extra users.
+[AWS SSH instructions](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-to-linux-instance.html) · [Ubuntu’s Compose package](https://packages.ubuntu.com/noble-updates/docker-compose-v2)
+
+## 4. Enable outgoing email in Amazon SES
+
+### Verify the sender and test mailbox
+
+1. Open [Amazon SES](https://console.aws.amazon.com/ses/) in **Sydney**. Go to **Verified identities → Create identity → Domain**, enter `bond-sdc.com` and use **Easy DKIM**. After you create the identity, copy the three DKIM **CNAME** records SES shows into your DNS provider. Use **DNS only** for these CNAMEs on Cloudflare. Wait for the domain to show **Verified**. This authorises the sender `digest@bond-sdc.com`.
+2. In **Verified identities**, create a second identity of type **Email address**. Enter your return email address and click the verification link SES sends you. A single verified test mailbox works in the Sydney SES sandbox.
+
+### Give EC2 permission to send
+
+1. Open [IAM](https://console.aws.amazon.com/iam/). Go to **Roles → Create role → AWS service → EC2** and choose the **EC2** use case. Continue without selecting a permissions policy. Name the role `BondDigestBotEc2Role` and create it.
+2. Open the new role. In **Permissions**, choose **Add permissions → Create inline policy → JSON**. Paste the policy below. Replace `YOUR_AWS_ACCOUNT_ID` with your 12-digit account ID from the console account menu. Replace `YOUR_VERIFIED_RETURN_ADDRESS` with your verified return address in lowercase. Choose **Next**, name the policy `SendDigestEmail` and save it.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SendDigestMail",
+      "Effect": "Allow",
+      "Action": "ses:SendEmail",
+      "Resource": "arn:aws:ses:ap-southeast-2:YOUR_AWS_ACCOUNT_ID:identity/bond-sdc.com",
+      "Condition": {
+        "StringEquals": { "ses:FromAddress": "digest@bond-sdc.com" },
+        "ForAllValues:StringEquals": { "ses:Recipients": ["YOUR_VERIFIED_RETURN_ADDRESS"] },
+        "Null": { "ses:Recipients": "false" }
+      }
+    }
+  ]
+}
+```
+
+3. In the EC2 console in Sydney, select `bond-sdc` and choose **Actions → Security → Modify IAM role**. Select `BondDigestBotEc2Role` and choose **Update IAM role**. Digest Bot uses this role to send via the SES HTTPS API.
+
+[AWS sender identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html) · [SES permissions](https://docs.aws.amazon.com/ses/latest/dg/control-user-access.html) · [Attach a role to EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/attach-iam-role.html)
+
+## 5. Configure and start both containers
+
+Run these commands in the SSH terminal. They check out the `docker-ec2` branches. After both changes merge into `main`, you can omit `--branch docker-ec2` in both clone commands.
 
 ```bash
-sudo htpasswd -cB /etc/nginx/digest-users josh
-sudo chown root:www-data /etc/nginx/digest-users
-sudo chmod 0640 /etc/nginx/digest-users
+mkdir -p ~/bond-sdc
+cd ~/bond-sdc
+git clone --branch docker-ec2 https://github.com/JModify/bond-service-desk-central.git
+git clone --branch docker-ec2 https://github.com/JModify/bond-digest-bot.git
+cd bond-digest-bot
+sudo install -d -m 0700 -o 1000 -g 1000 var/data
+sudo install -m 0600 .env.example .env
+sudo docker run --rm -it --entrypoint caddy caddy:2.11.9-alpine hash-password
 ```
 
-## 5. Issue certificates and start the service
+Enter and confirm the web password you want for Digest Bot. Copy the resulting hash, which starts with `$2`. Open the settings file with `sudo nano .env` and fill it in as follows.
 
-Install the HTTP-only configuration first. Disable the stock Nginx site on a fresh dedicated instance by unlinking its enabled symlink, if present.
-
-```bash
-cd /opt/digest-bot
-sudo install -m 0644 deploy/nginx-bootstrap.conf /etc/nginx/sites-available/bond-sdc
-sudo ln -sfn /etc/nginx/sites-available/bond-sdc /etc/nginx/sites-enabled/bond-sdc
-if [ -L /etc/nginx/sites-enabled/default ]; then sudo unlink /etc/nginx/sites-enabled/default; fi
-sudo nginx -t
-sudo systemctl reload nginx
-
-sudo certbot certonly --webroot -w /var/www/acme --cert-name bond-sdc.com \
-  -d bond-sdc.com -d www.bond-sdc.com -d digest.bond-sdc.com
-sudo certbot certonly --webroot -w /var/www/acme --cert-name mail.bond-sdc.com \
-  -d mail.bond-sdc.com
-
-sudo install -m 0755 deploy/renew-certificates.sh /etc/letsencrypt/renewal-hooks/deploy/bond-sdc
-sudo env RENEWED_LINEAGE=/etc/letsencrypt/live/mail.bond-sdc.com /etc/letsencrypt/renewal-hooks/deploy/bond-sdc
-sudo docker compose up -d --build
-curl --fail http://127.0.0.1:8080/healthz
-
-sudo install -m 0644 deploy/nginx.conf /etc/nginx/sites-available/bond-sdc
-sudo nginx -t
-sudo systemctl reload nginx
-sudo systemctl enable --now certbot.timer
-sudo certbot renew --dry-run
-```
-
-The renewal hook reloads Nginx for the web certificate and copies the separate mail certificate into the container’s mounted directory before restarting the mail service. The SQLite queue persists across restarts. [Certbot webroot and renewal hooks](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates)
-
-## 6. Publish the inbox MX and test delivery
-
-1. Add the `inbox` MX record from step 2 and confirm it resolves with `dig +short MX inbox.bond-sdc.com`. You can test SMTP TLS from an external connection that allows outbound port 25 with the command below.
-2. Open `https://bond-sdc.com/` and `https://digest.bond-sdc.com/`. Use the Digest Bot username and password. Confirm the manual upload and both `.eml` downloads work.
-3. Open **Digest editor** and save the subject preset. Go to **Email delivery**, enter your approved mailbox as **Return email address**, and select **Start email delivery**.
-4. In SharePoint, choose **Email a news digest**, select articles, and paste the generated address into **To** and the generated code into **Title**. Send the digest and keep the page open or return to the same browser tab to check status. The request accepts one email and expires after two hours. Confirm your mailbox receives the formatted digest from `digest@bond-sdc.com`. For automated delivery, this configured SES identity takes precedence over the manual export’s From field.
-5. For the first test, use non-sensitive articles and a mailbox you control. Check with Bond ITS that SharePoint/Exchange can send this digest to your external domain. If the picker or mail policy rejects the external address, use **Workspace** to upload the `.eml` while you confirm the permitted delivery route.
-
-```bash
-openssl s_client -starttls smtp -connect mail.bond-sdc.com:25 \
-  -servername mail.bond-sdc.com -verify_hostname mail.bond-sdc.com -verify_return_error </dev/null
-```
-
-[Create and send a SharePoint news digest](https://support.microsoft.com/en-us/sharepoint/sites-pages/create-and-send-a-news-digest)
-
-The landing page is deployed from its own repository. To connect the existing **SD Staff News Bot** card when you go live, edit `/var/www/service-desk-central/index.html`. Remove `tool-card-planned` from that card and replace its **Coming soon** button with:
-
-```html
-<a class="tool-action" href="https://digest.bond-sdc.com/">Open Digest Bot</a>
-```
-
-Make the same change in the landing page repository if you want it to persist when you redeploy its files.
-
-## Updates and troubleshooting
-
-```bash
-cd /opt/digest-bot
-sudo docker compose ps
-sudo docker compose logs --tail=100 digest-bot
-sudo git pull --ff-only
-sudo docker compose up -d --build
-```
-
-| What you see | What to check |
+| Setting | Enter |
 | --- | --- |
-| No connection on port 25 | Resolve the inbox MX and its target A, check the EC2 security group, and confirm the container started with its mail certificate. |
-| SMTP rejects the address or title | Copy both values from a currently waiting request. A processed or expired address is closed. |
-| Digest contains links outside the configured site | Confirm the hostname in the SharePoint article URLs and check `DIGEST_SHAREPOINT_HOSTS`. |
-| SES rejects delivery | Check that the Sydney identity is verified, the instance role is attached, and the recipient is verified if the account is in the sandbox. |
-| Amazon SES accepted the digest, but it hasn’t arrived | Check junk and any Exchange quarantine. Check SES delivery events or bounce notifications. |
-| Delivery could not be confirmed | Check the inbox before starting another request. The worker avoids an automatic resend when SES might already have accepted it. |
+| `ACME_EMAIL` | Your email for the certificate account |
+| `DIGEST_AUTH_USER` | Your web login username. The template uses `josh`. |
+| `DIGEST_AUTH_HASH` | The hash you just copied, inside the existing single quotes |
+| `DIGEST_ALLOWED_RECIPIENTS` | The same verified return address you put in the IAM policy |
 
-The service accepts messages up to **10 MiB** for one-time recipients and uses a local queue under `/opt/digest-bot/var/data`. It clears the stored message body at terminal status and prunes completed request metadata after the expiry window plus 24 hours. Limit EC2 access and apply your data retention policy to any EBS backups. Both the queue and private SMTP key are outside the Git repository.
+In Nano, press **Ctrl+O**, **Enter**, then **Ctrl+X**. If you used the previous Nginx setup, see the migration note below before starting the stack.
+
+Check that all four DNS names show your Elastic IP. Once they do, start both apps with Compose.
+
+```bash
+for host in bond-sdc.com www.bond-sdc.com digest.bond-sdc.com mail.bond-sdc.com; do
+  printf '%s ' "$host"
+  dig +short "$host" A
+done
+
+sudo docker compose config --quiet
+sudo docker compose up -d --build --wait --wait-timeout 420
+sudo docker compose ps
+```
+
+The first run builds both images and waits for the certificates. Expect two healthy services. Open [Service Desk Central](https://bond-sdc.com/) and [Digest Bot](https://digest.bond-sdc.com/). Use your web login for Digest Bot. For a quick test, open **Workspace**, upload a SharePoint `.eml` you can use for testing and check the preview and download.
+
+## 6. Route SharePoint mail and test a digest
+
+1. In the SSH terminal, check that the SMTP listener presents a valid certificate. Look for `Verification: OK`.
+
+   ```bash
+   openssl s_client -starttls smtp -connect 127.0.0.1:25 \
+     -servername mail.bond-sdc.com -verify_hostname mail.bond-sdc.com \
+     -verify_return_error -brief </dev/null
+   ```
+
+2. In DNS, add an **MX** record with name `inbox` (`inbox.bond-sdc.com`), priority `10` and target `mail.bond-sdc.com`. Run `dig +short MX inbox.bond-sdc.com` and look for `10 mail.bond-sdc.com.`.
+3. In Digest Bot’s **Digest editor**, save a subject. Open **Email delivery**, enter your verified return address and click **Start email delivery**. Copy the generated **To** address and **Title** code.
+4. In SharePoint, open the News section, choose **See all → Email a news digest**, select test articles and choose **Next**. Put the generated address in **To** and the code in **Title**, then send the digest. SharePoint needs to be allowed to mail the external inbox domain. You can use **Workspace** for manual `.eml` formatting if external delivery is blocked.
+5. Check the status in Digest Bot, then check your mailbox for the formatted reply from `digest@bond-sdc.com`. A status that SES accepted the message means it was handed off for delivery.
+
+[Microsoft’s SharePoint news digest instructions](https://support.microsoft.com/en-us/sharepoint/sites-pages/create-and-send-a-news-digest)
+
+## Troubleshooting and updates
+
+Run `sudo docker compose logs --tail=80` from `~/bond-sdc/bond-digest-bot` to see both services’ logs.
+
+| Symptom | Check |
+| --- | --- |
+| Caddy stays unhealthy or a browser shows a certificate error | Check the four A records, the security group’s ports `80` and `443`, and `sudo docker compose logs service-desk-central`. |
+| Digest Bot rejects the login | Check the username and the single-quoted hash in `.env`. Run `sudo docker compose up -d` after editing it. |
+| Digest Bot keeps waiting for SharePoint mail | Check the MX target and inbound TCP `25`. Confirm you used the **To** address and **Title** code from the same request. |
+| Digest Bot cannot send through SES | Check both verified identities in Sydney, the role on EC2, the exact return address in the policy and `.env`, and the metadata hop limit of `2`. |
+| Compose reports a port is already in use | Check whether Nginx or the old Digest Bot container owns `80`, `443` or `25`. |
+
+To deploy later code changes, pull both repos and recreate the containers. Compose preserves the certificate volumes and `var/data`.
+
+```bash
+cd ~/bond-sdc/bond-digest-bot
+git -C ../bond-service-desk-central pull --ff-only
+git pull --ff-only
+sudo docker compose up -d --build --force-recreate --wait --wait-timeout 420
+```
+
+**Migrating from the previous guide.** On the existing EC2 server, complete Step 5 up to the first Compose start. Stop the old Digest Bot with `sudo docker compose --project-directory /opt/digest-bot stop digest-bot`, then copy its SQLite files with `sudo cp -a /opt/digest-bot/var/data/. var/data/` from the new checkout. If Nginx hosted just these two sites, disable it and the old Certbot timer with `sudo systemctl disable --now nginx certbot.timer`. Then start the new stack using Step 5. Reuse the existing Elastic IP, DNS records and SES role.
+
+**Adding recipients later.** Add each address to the IAM `ses:Recipients` list and the comma-separated `DIGEST_ALLOWED_RECIPIENTS` setting, then run `sudo docker compose up -d`. Verify each new address in SES while in the sandbox. If you need to send to unverified recipients, see [SES production access](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html) and [bounce and complaint notifications](https://docs.aws.amazon.com/ses/latest/dg/configure-sns-notifications.html).
+
+**Pausing or retiring the stack.** `sudo docker compose stop` pauses the apps and keeps the data. AWS can still charge for allocated resources. If you retire the server, back up `var/data` and your settings, then [terminate the instance](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/terminating-instances.html) and [release its Elastic IP](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/working-with-eips.html#using-instance-addressing-eips-releasing).

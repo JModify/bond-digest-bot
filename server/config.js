@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { normaliseAddress } from "../dist/core/mailbox.js";
 
 const hostnamePattern = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
@@ -33,6 +34,7 @@ export function loadConfig(env = process.env) {
   if (!sharepointHosts.length || !sharepointHosts.every((host) => hostnamePattern.test(host))) {
     throw new Error("DIGEST_SHAREPOINT_HOSTS must contain at least one hostname.");
   }
+  const tlsDir = env.DIGEST_TLS_DIR ?? "./var/smtp-tls";
   return {
     origin: origin.origin,
     inboxDomain: hostname(env.DIGEST_INBOX_DOMAIN ?? "inbox.bond-sdc.com", "DIGEST_INBOX_DOMAIN"),
@@ -43,7 +45,8 @@ export function loadConfig(env = process.env) {
     sharepointHosts,
     region: env.AWS_REGION || "ap-southeast-2",
     databasePath: env.DIGEST_DATABASE ?? "./var/digest.sqlite",
-    tlsDir: env.DIGEST_TLS_DIR ?? "./var/smtp-tls",
+    tlsKeyPath: env.DIGEST_TLS_KEY_FILE ?? join(tlsDir, "privkey.pem"),
+    tlsCertPath: env.DIGEST_TLS_CERT_FILE ?? join(tlsDir, "fullchain.pem"),
     maxMessageBytes: 10 * 1024 * 1024,
   };
 }

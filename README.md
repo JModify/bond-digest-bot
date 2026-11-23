@@ -7,7 +7,7 @@ Digest Bot formats SharePoint news emails using the Bond Staff News layout.
 
 ## Deploy and test
 
-Follow the [EC2 setup guide](deploy/EC2.md) to deploy Digest Bot at `digest.bond-sdc.com`, serve Service Desk Central on the same instance, and configure DNS, HTTPS and SES.
+Follow the [EC2 setup guide](deploy/EC2.md) to run both applications with one Docker Compose project. The Service Desk Central container serves the public site and manages HTTPS. The Digest Bot container runs the web app, the incoming mail listener and the Amazon SES delivery worker.
 
 Run `npm ci` and `npm test` with Node.js 24+ to exercise the HTTP, SMTP, processing and export flows. The tests use an in-process delivery transport. To test just the manual interface, serve the `dist/` directory with a static web server.
 
