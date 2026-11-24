@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply a Service Desk Central maintenance request
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/bond-sdc-admin
+ExecStart=/usr/bin/python3 /usr/local/libexec/bond-sdc-host-admin.py
+TimeoutStartSec=20min
+UMask=0077

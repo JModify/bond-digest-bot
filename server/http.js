@@ -16,12 +16,16 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-export function createWebServer(config, log = console) {
+export function createWebServer(config, log = console, admin) {
   async function route(req, res) {
-    const path = new URL(req.url, config.origin).pathname;
+    const url = new URL(req.url, config.origin);
+    const { pathname: path } = url;
     const isRead = req.method === "GET" || req.method === "HEAD";
     res.setHeader("X-Content-Type-Options", "nosniff");
 
+    if (path === "/admin" || path.startsWith("/admin/")) {
+      return admin ? admin.handle(req, res, url) : json(res, 404, { message: "Administration is not configured." });
+    }
     if (path === "/healthz" && isRead) return json(res, 200, { ok: true });
     if (path === "/api/email" && isRead && config.emailDeliveryEnabled) {
       return json(res, 200, { groupAddress: config.groupAddress });

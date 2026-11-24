@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for a Service Desk Central maintenance request
+
+[Path]
+PathExists=/var/lib/bond-sdc-admin/requests/request.json
+Unit=bond-sdc-admin.service
+
+[Install]
+WantedBy=multi-user.target

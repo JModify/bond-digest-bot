@@ -23,6 +23,12 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    environment:
+      SDC_ADMIN_ENABLED: ${SDC_ADMIN_ENABLED:-false}
+      SDC_ADMIN_DATABASE: /admin-data/admin.sqlite
+      SDC_ADMIN_EC2_INSTANCE_ID: ${SDC_ADMIN_EC2_INSTANCE_ID:-}
+    volumes:
+      - sdc-admin-data:/admin-data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
       interval: 30s
@@ -34,3 +40,4 @@ services:
 volumes:
   caddy-data:
   caddy-config:
+  sdc-admin-data:

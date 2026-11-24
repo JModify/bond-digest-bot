@@ -13,4 +13,6 @@ Both tabs are public. Automatic replies use the original From address after a pa
 
 Follow the [EC2 setup guide](deploy/EC2.md) to run Service Desk Central and Digest Bot with Docker Compose. See [Enable automatic digests on EC2](deploy/email-delivery.md) for the Microsoft 365 group, DNS, SES and upgrade steps. Automatic delivery is enabled by adding `compose.delivery.yaml` to the Compose command.
 
+The [Service Desk Central administration guide](deploy/admin.md) covers the private email history, resends and EC2 maintenance controls.
+
 Install dependencies with `npm ci` on Node.js 24+. Run `npm start` and open `http://localhost:8080/#manual` to use the manual formatter locally. Run `npm test` to exercise the manual export, HTTP and signed SMTP flow with an in-process mail transport.

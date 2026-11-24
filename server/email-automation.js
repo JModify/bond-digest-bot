@@ -40,17 +40,19 @@ export function prepareEmailDelivery(config, onError) {
   });
 
   return {
-    start(onListening) {
+    store,
+    start(onListening, outgoingPaused) {
       smtp.listen(2525, "0.0.0.0", () => {
-        stopWorker = startDeliveryWorker(config, store, transport);
+        stopWorker = startDeliveryWorker(config, store, transport, console, outgoingPaused);
         console.log("Digest Bot is listening on SMTP 2525");
         onListening();
       });
     },
-    async close() {
+    async close(webDrained) {
       clearInterval(tlsRefresh);
       await Promise.all([new Promise((resolve) => smtp.close(resolve)), stopWorker()]);
       transport.close();
+      await webDrained;
       store.close();
     },
   };

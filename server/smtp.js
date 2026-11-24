@@ -1,4 +1,6 @@
 import { SMTPServer } from "smtp-server";
+import { normaliseAddress } from "../dist/core/mailbox.js";
+import { readEmailSubject } from "../dist/core/mime.js";
 import { DEFAULT_PRESET } from "../dist/core/preset.js";
 import { createDigestAuthenticator, smtpReply } from "./incoming.js";
 
@@ -47,14 +49,24 @@ export function createSmtpServer(config, store, tls, resolveDns) {
           helo: session.hostNameAppearsAs,
         });
         const authMs = Math.round(performance.now() - authStartedAt);
-        const result = store.enqueueIncoming({ ...identity, raw, subject: DEFAULT_PRESET.subject });
+        const sourceSubject = readEmailSubject(raw).slice(0, 512);
+        const result = store.enqueueIncoming({ ...identity, raw, sourceSubject, subject: DEFAULT_PRESET.subject });
         if (result === "busy") throw temporaryFailure();
         if (result === "queued") console.info("Authenticated digest queued", { method: identity.method, authMs });
         done(null, result === "duplicate" ? "Digest already received" : "Digest queued");
       }
       receive().catch((error) => {
         if (error.authentication) console.warn("Digest authentication rejected", JSON.stringify(error.authentication));
-        done(error.responseCode ? error : temporaryFailure());
+        const reply = error.responseCode ? error : temporaryFailure();
+        const authentication = error.authentication;
+        const result = authentication ? ` DKIM: ${authentication.dkim.map(({ result }) => result).join(", ") || "none"}. SPF: ${authentication.spf}.` : "";
+        try {
+          store.recordSmtpAttempt({ source: normaliseAddress(session.envelope.mailFrom.address),
+            state: reply.responseCode >= 500 ? "rejected" : "deferred", description: `SMTP ${reply.responseCode}: ${reply.message}.${result}` });
+        } catch {
+          console.error("Could not record the SMTP attempt");
+        }
+        done(reply);
       });
     },
   });

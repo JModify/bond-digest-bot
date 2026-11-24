@@ -1,0 +1,10 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ec2:RebootInstances",
+      "Resource": "arn:aws:ec2:ap-southeast-2:YOUR_AWS_ACCOUNT_ID:instance/YOUR_EC2_INSTANCE_ID"
+    }
+  ]
+}

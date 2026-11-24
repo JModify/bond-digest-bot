@@ -9,13 +9,20 @@ if (config.emailDeliveryEnabled) {
   const { prepareEmailDelivery } = await import("./email-automation.js");
   delivery = prepareEmailDelivery(config, () => shutdown(1));
 }
-const web = createWebServer(config);
+let admin;
+if (config.admin) {
+  const { createAdminPanel } = await import("./admin/routes.js");
+  admin = createAdminPanel(config, delivery?.store);
+}
+const web = createWebServer(config, console, admin);
 
 async function shutdown(exitCode = 0) {
   if (finishing) return;
   finishing = true;
   process.exitCode = exitCode;
-  await Promise.all([new Promise((resolve) => web.close(resolve)), delivery?.close()]);
+  const webDrained = new Promise((resolve) => web.close(resolve));
+  await Promise.all([webDrained, delivery?.close(webDrained)]);
+  admin?.close();
 }
 
 web.on("error", (error) => {
@@ -27,5 +34,5 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => shutdown())
 function startWeb() {
   web.listen(8080, "0.0.0.0", () => console.log("Digest Bot is listening on HTTP 8080"));
 }
-if (delivery) delivery.start(startWeb);
+if (delivery) delivery.start(startWeb, admin?.outgoingPaused);
 else startWeb();

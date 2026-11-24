@@ -1,0 +1,16 @@
+services:
+  digest-bot:
+    environment:
+      SDC_ADMIN_UPDATE_DIR: /run/sdc-admin
+    volumes:
+      - type: bind
+        source: /var/lib/bond-sdc-admin/requests
+        target: /run/sdc-admin/requests
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /var/lib/bond-sdc-admin/status
+        target: /run/sdc-admin/status
+        read_only: true
+        bind:
+          create_host_path: false

@@ -5,8 +5,19 @@
 }
 
 bond-sdc.com {
-	root * /usr/share/caddy
-	file_server
+	@admin path /admin /admin/*
+	handle @admin {
+		request_body {
+			max_size 8KiB
+		}
+		reverse_proxy digest-bot:8080 {
+			header_up X-Sdc-Admin-Client {remote_host}
+		}
+	}
+	handle {
+		root * /usr/share/caddy
+		file_server
+	}
 }
 
 www.bond-sdc.com {
@@ -14,6 +25,8 @@ www.bond-sdc.com {
 }
 
 digest.bond-sdc.com {
+	@admin path /admin /admin/*
+	respond @admin 404
 	request_body {
 		max_size 16KiB
 	}

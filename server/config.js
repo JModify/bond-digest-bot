@@ -10,13 +10,28 @@ function hostname(value, name) {
   return host;
 }
 
+function adminConfig(env) {
+  if (env.SDC_ADMIN_ENABLED !== "true") return undefined;
+  const origin = new URL(env.SDC_ADMIN_ORIGIN ?? "https://bond-sdc.com");
+  if (origin.protocol !== "https:" || origin.href !== origin.origin + "/") {
+    throw new Error("SDC_ADMIN_ORIGIN must be an HTTPS origin without a path.");
+  }
+  const instanceId = env.SDC_ADMIN_EC2_INSTANCE_ID?.trim();
+  if (instanceId && !/^i-(?:[a-f0-9]{8}|[a-f0-9]{17})$/.test(instanceId)) {
+    throw new Error("SDC_ADMIN_EC2_INSTANCE_ID must be an EC2 instance ID.");
+  }
+  return { origin: origin.origin, host: origin.host, instanceId,
+    region: env.AWS_REGION || "ap-southeast-2", updateDir: env.SDC_ADMIN_UPDATE_DIR,
+    databasePath: env.SDC_ADMIN_DATABASE ?? "./var/admin.sqlite" };
+}
+
 export function loadConfig(env = process.env) {
   const origin = new URL(env.DIGEST_PUBLIC_ORIGIN ?? "https://digest.bond-sdc.com");
   if (origin.protocol !== "https:" || origin.href !== origin.origin + "/") {
     throw new Error("DIGEST_PUBLIC_ORIGIN must be an HTTPS origin without a path.");
   }
   const emailDeliveryEnabled = env.DIGEST_EMAIL_DELIVERY_ENABLED === "true";
-  const webConfig = { origin: origin.origin, emailDeliveryEnabled };
+  const webConfig = { origin: origin.origin, emailDeliveryEnabled, admin: adminConfig(env) };
   if (!emailDeliveryEnabled) return webConfig;
 
   const groupAddress = normaliseAddress(env.DIGEST_GROUP_ADDRESS).toLowerCase();
