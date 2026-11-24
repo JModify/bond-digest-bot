@@ -54,7 +54,7 @@ In the AWS Sydney region, open **EC2 → Instances → your instance → Securit
 ### Outgoing mail through Amazon SES
 
 1. In **Amazon SES → Verified identities** in **Asia Pacific (Sydney)**, check that `bond-sdc.com` is **Verified**. If missing, create a domain identity with **Easy DKIM** and add its CNAME records to DNS.
-2. Update the existing EC2 role’s SES permission with the [policy template](iam-ses-send.template.json). Replace `YOUR_AWS_ACCOUNT_ID`. The revised statement permits `ses:SendEmail` from `digest@bond-sdc.com` to any recipient. If you create a role, attach it in **EC2 → Instances → Actions → Security → Modify IAM role**.
+2. Update the existing EC2 role’s SES permission with the [policy template](iam-ses-send.template.json). Replace `YOUR_AWS_ACCOUNT_ID`. The policy allows `ses:SendEmail` and `ses:SendRawEmail` from `digest@bond-sdc.com`. SES checks `ses:SendRawEmail` when the bot sends the formatted MIME message through the SES v2 API. If you create a role, attach it in **EC2 → Instances → Actions → Security → Modify IAM role**.
 3. In the EC2 metadata options, check **IMDSv2 required** and set **Metadata response hop limit** to `2` so the Docker container can use the role. In **SES → Account dashboard**, request production access in Sydney to send to any inbox. For a sandbox pilot, use an address you have already verified in SES.
 
 [SES verified identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html) · [SES sandbox](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html) · [Attach a role to EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/attach-iam-role.html) · [Set EC2 metadata options](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-options.html)
@@ -99,7 +99,8 @@ sudo docker compose -f compose.yaml -f compose.delivery.yaml logs --tail=80 dige
 | DKIM `none` or `domain-mismatch` and SPF `domain-mismatch` | Ask the outbound email administrator to sign the guest copy for the original From domain. The SPF result is bound to the SMTP envelope domain. |
 | DKIM `body-changed` | Have the outbound gateway DKIM-sign the final message after it applies group footers, disclaimers or link rewriting. |
 | DKIM `unsigned-mime-header` | Ask the outbound gateway to cover From, Content-Type and any Content-Transfer-Encoding header in its DKIM signature. |
-| **Authenticated digest queued** followed by an SES error | Check the SES region, sender identity, role policy, sandbox status and metadata hop limit. |
+| **Digest delivery returned an error** with status `403` | Check that the attached EC2 role allows `ses:SendRawEmail` for the verified sender identity using the [policy template](iam-ses-send.template.json). |
+| **Authenticated digest queued** followed by another SES error | Check the SES region, sender identity, role policy, sandbox status and metadata hop limit. |
 | **Formatted digest accepted by SES** | Check the recipient’s inbox, Junk Email and Exchange quarantine. SES acceptance records a successful handoff. |
 
 The bot replies to the authenticated `From` address. It records the Message-ID or verified signature key for seven days to suppress repeat deliveries, and clears the source content when a job reaches a final state. [Microsoft DKIM documentation](https://learn.microsoft.com/en-us/defender-office-365/email-authentication-dkim-configure) · [Exchange message trace](https://learn.microsoft.com/en-us/exchange/monitoring/trace-an-email-message/message-trace-modern-eac)
