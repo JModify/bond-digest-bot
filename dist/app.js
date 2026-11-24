@@ -167,7 +167,7 @@ async function loadGroupAddress() {
 }
 
 function showWorkflow() {
-  const automatic = location.hash === "#automatic";
+  const automatic = location.hash === "" || location.hash === "#automatic";
   byId("manual-view").hidden = automatic;
   byId("automatic-view").hidden = !automatic;
   byId("privacy-note").hidden = automatic;

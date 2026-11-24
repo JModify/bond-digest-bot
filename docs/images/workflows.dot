@@ -1,0 +1,48 @@
+digraph DigestBotWorkflows {
+  graph [
+    bgcolor="#F5F8FE", pad=0.3, nodesep=0.35, ranksep=0.33, newrank=true,
+    fontname="DejaVu Sans", fontsize=20, fontcolor="#172C49",
+    labelloc=t, label="Two ways to format a SharePoint digest", dpi=170
+  ];
+  node [
+    shape=box, style="rounded,filled", fontname="DejaVu Sans",
+    fontsize=12, margin="0.22,0.13", width=2.75, fontcolor="#172C49",
+    color="#BFCEE1", fillcolor="#FFFFFF"
+  ];
+  edge [color="#547395", penwidth=1.5, arrowsize=0.7];
+
+  subgraph cluster_manual {
+    label="Manual in the browser";
+    fontsize=15;
+    color="#C6D6EA";
+    style="rounded,filled";
+    fillcolor="#EAF1FB";
+    margin=20;
+
+    inbox [label="Outlook\nReceive the SharePoint digest"];
+    file [label="Digest Bot\nAdd the saved .eml file"];
+    manual_format [label="Shared formatter\nExtract articles and rebuild the email", color="#5E86B7", fillcolor="#DFECFE"];
+    download [label="Outlook\nOpen the download and forward it"];
+    inbox -> file -> manual_format -> download;
+  }
+
+  subgraph cluster_automatic {
+    label="Automatic on EC2";
+    fontsize=15;
+    color="#BDD7DE";
+    style="rounded,filled";
+    fillcolor="#E8F4F5";
+    margin=20;
+
+    group [label="Microsoft 365 group\nReceive the SharePoint digest"];
+    smtp [label="Digest Bot\nAuthenticate and queue the SMTP copy"];
+    automatic_format [label="Shared formatter\nExtract articles and rebuild the email", color="#5E86B7", fillcolor="#DFECFE"];
+    reply [label="Amazon SES\nSend the reply to the original sender"];
+    group -> smtp -> automatic_format -> reply;
+  }
+
+  { rank=same; inbox; group; }
+  { rank=same; file; smtp; }
+  { rank=same; manual_format; automatic_format; }
+  { rank=same; download; reply; }
+}

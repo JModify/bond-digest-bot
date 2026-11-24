@@ -244,10 +244,16 @@ test("the website exposes only the group address when automatic mode is configur
     assert.doesNotMatch(page, /delivery-form|editor-form|Return email address/);
     const { window } = new JSDOM(page);
     t.after(() => window.close());
-    const footer = window.document.querySelector("body > footer");
+    const { document } = window;
+    const tabs = [...document.querySelectorAll("[data-workflow]")];
+    assert.deepEqual(tabs.map((tab) => tab.dataset.workflow), ["automatic", "manual"]);
+    assert.equal(tabs[0].getAttribute("aria-current"), "page");
+    assert.equal(document.getElementById("automatic-view").hidden, false);
+    assert.equal(document.getElementById("manual-view").hidden, true);
+    const footer = document.querySelector("body > footer");
     assert.match(footer.textContent, /Author: Joshua Lavagna-Slater/);
     assert.equal(footer.querySelector(".version").textContent, `v${version}`);
-    assert.equal(window.document.querySelector("header .home-link").href, "https://bond-sdc.com/");
+    assert.equal(document.querySelector("header .home-link").href, "https://bond-sdc.com/");
     assert.equal((await fetch(base + "/healthz")).status, 200);
     const settings = await fetch(base + "/api/email");
     if (current.emailDeliveryEnabled) assert.deepEqual(await settings.json(), { groupAddress: config.groupAddress });
