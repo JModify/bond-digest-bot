@@ -173,8 +173,11 @@ test("protects maintenance and resends with roles, origin checks and revocable s
     return header.split(";")[0];
   };
 
+  const signInPage = await request("/admin");
+  assert.equal(signInPage.headers.get("referrer-policy"), "same-origin");
   assert.equal((await request("/admin/mail")).status, 303);
   assert.equal((await request("/admin/mail", { headers: { host: "digest.bond-sdc.com" } })).status, 404);
+  assert.equal((await request("/admin/login", { body: {}, headers: { origin: "null" } })).status, 403);
   assert.equal((await request("/admin/login", { body: { username: "jlavagna", password: "admin" } })).status, 401);
   const cookie = await login("jlavagna", password);
   const detail = await request("/admin/mail/1", { cookie });

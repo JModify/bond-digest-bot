@@ -259,7 +259,8 @@ export function createAdminPanel(config, store, host = createHostActions(config.
   async function handle(req, res, url) {
     if (req.headers.host?.toLowerCase() !== config.admin.host) return errorPage(res, 404, "This page does not exist.");
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Referrer-Policy", "no-referrer");
+    // A no-referrer policy makes native form submissions send Origin: null.
+    res.setHeader("Referrer-Policy", "same-origin");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
     const path = url.pathname.replace(/\/$/, "");
