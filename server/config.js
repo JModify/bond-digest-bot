@@ -10,11 +10,6 @@ function hostname(value, name) {
   return host;
 }
 
-export function recipientAllowed(address, { allowedRecipients, recipientDomains }) {
-  const email = normaliseAddress(address).toLowerCase();
-  return Boolean(email && (allowedRecipients.includes(email) || recipientDomains.includes(email.split("@")[1])));
-}
-
 export function loadConfig(env = process.env) {
   const origin = new URL(env.DIGEST_PUBLIC_ORIGIN ?? "https://digest.bond-sdc.com");
   if (origin.protocol !== "https:" || origin.href !== origin.origin + "/") {
@@ -27,19 +22,11 @@ export function loadConfig(env = process.env) {
   const groupAddress = normaliseAddress(env.DIGEST_GROUP_ADDRESS).toLowerCase();
   if (!groupAddress) throw new Error("Set DIGEST_GROUP_ADDRESS to the Microsoft 365 group email address.");
   const inboxDomain = hostname(env.DIGEST_INBOX_DOMAIN ?? "inbox.bond-sdc.com", "DIGEST_INBOX_DOMAIN");
-  const allowedRecipients = list(env.DIGEST_ALLOWED_RECIPIENTS);
-  const recipientDomains = list(env.DIGEST_ALLOWED_RECIPIENT_DOMAINS);
-  if (!allowedRecipients.length && !recipientDomains.length) {
-    throw new Error("Configure at least one allowed recipient or recipient domain.");
-  }
-  if (!allowedRecipients.every(normaliseAddress) || !recipientDomains.every((domain) => hostnamePattern.test(domain))) {
-    throw new Error("The recipient allowlist contains an invalid email address or domain.");
-  }
   const from = normaliseAddress(env.DIGEST_FROM ?? "digest@bond-sdc.com");
   if (!from) throw new Error("DIGEST_FROM must be an email address verified in SES.");
-  const sharepointHosts = list(env.DIGEST_SHAREPOINT_HOSTS ?? "bonduni.sharepoint.com");
-  if (!sharepointHosts.length || !sharepointHosts.every((host) => hostnamePattern.test(host))) {
-    throw new Error("DIGEST_SHAREPOINT_HOSTS must contain at least one hostname.");
+  const sharepointHosts = list(env.DIGEST_SHAREPOINT_HOSTS);
+  if (!sharepointHosts.every((host) => hostnamePattern.test(host))) {
+    throw new Error("DIGEST_SHAREPOINT_HOSTS must contain valid hostnames.");
   }
   const tlsDir = env.DIGEST_TLS_DIR ?? "./var/smtp-tls";
   return {
@@ -48,8 +35,6 @@ export function loadConfig(env = process.env) {
     inboxAddress: "digest@" + inboxDomain,
     mailHost: hostname(env.DIGEST_MAIL_HOST ?? "mail.bond-sdc.com", "DIGEST_MAIL_HOST"),
     from,
-    allowedRecipients,
-    recipientDomains,
     sharepointHosts,
     region: env.AWS_REGION || "ap-southeast-2",
     databasePath: env.DIGEST_DATABASE ?? "./var/digest.sqlite",
