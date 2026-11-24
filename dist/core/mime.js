@@ -1,21 +1,40 @@
 import { mailboxFromHeader, normaliseAddress } from "./mailbox.js";
 
-// MIME decoding and serialization use byte arrays so Windows-1252 and UTF-8
-// messages go through the same pipeline in the browser or a future worker.
+// Keep MIME bytes intact until each part's character encoding is known.
 const utf8 = new TextEncoder();
 const crlf = "\r\n";
+const byteChunkSize = 8192;
+
+function nodeBufferView(bytes) {
+  if (typeof Buffer === "undefined") return null;
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+function byteString(bytes) {
+  let value = "";
+  for (let offset = 0; offset < bytes.length; offset += byteChunkSize) {
+    value += String.fromCharCode(...bytes.subarray(offset, offset + byteChunkSize));
+  }
+  return value;
+}
+
+// Each character in a byte string represents exactly one byte.
+function readByteString(value) {
+  const bytes = new Uint8Array(value.length);
+  for (let index = 0; index < value.length; index += 1) {
+    bytes[index] = value.charCodeAt(index);
+  }
+  return bytes;
+}
 
 export function toBase64(bytes) {
   if (typeof bytes.toBase64 === "function") return bytes.toBase64();
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 8192) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
-  }
-  return btoa(binary);
+  const buffer = nodeBufferView(bytes);
+  return buffer ? buffer.toString("base64") : btoa(byteString(bytes));
 }
 
 function fromBase64(value) {
-  return Uint8Array.from(atob(value.replace(/\s/g, "")), (character) => character.charCodeAt(0));
+  return readByteString(atob(value.replace(/\s/g, "")));
 }
 
 function decodeText(bytes, charset) {
@@ -47,13 +66,15 @@ function quotedPrintable(value) {
   const bytes = new Uint8Array(raw.length);
   let length = 0;
   for (let index = 0; index < raw.length; index += 1) {
-    const pair = raw.slice(index + 1, index + 3);
-    if (raw[index] === "=" && /^[\da-f]{2}$/i.test(pair)) {
-      bytes[length++] = Number.parseInt(pair, 16);
-      index += 2;
-    } else {
-      bytes[length++] = raw.charCodeAt(index);
+    if (raw[index] === "=") {
+      const pair = raw.slice(index + 1, index + 3);
+      if (/^[\da-f]{2}$/i.test(pair)) {
+        bytes[length++] = Number.parseInt(pair, 16);
+        index += 2;
+        continue;
+      }
     }
+    bytes[length++] = raw.charCodeAt(index);
   }
   return bytes.subarray(0, length);
 }
@@ -65,7 +86,7 @@ function readBody(value, encoding) {
     case "quoted-printable":
       return quotedPrintable(value);
     default:
-      return Uint8Array.from(value, (character) => character.charCodeAt(0));
+      return readByteString(value);
   }
 }
 
@@ -86,7 +107,9 @@ function readHeaders(raw) {
   const headers = new Map();
   for (const line of raw.replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/)) {
     const field = /^([\w-]+):\s*(.*)$/.exec(line);
-    if (field && !headers.has(field[1].toLowerCase())) headers.set(field[1].toLowerCase(), field[2]);
+    if (!field) continue;
+    const name = field[1].toLowerCase();
+    if (!headers.has(name)) headers.set(name, field[2]);
   }
   return headers;
 }
@@ -149,17 +172,13 @@ function readParts(entity, result, depth = 0) {
 }
 
 function rawText(bytes) {
-  // Use an identity byte-to-character mapping while splitting MIME parts.
-  let raw = "";
-  for (let offset = 0; offset < bytes.length; offset += 8192) {
-    raw += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
-  }
+  // Buffer's Latin-1 conversion preserves byte values during MIME parsing.
+  const raw = nodeBufferView(bytes)?.toString("latin1") ?? byteString(bytes);
   return raw.replace(/^\xef\xbb\xbf/, "");
 }
 
 function readSubject(headers) {
-  const value = headers.get("subject") ?? "";
-  const bytes = Uint8Array.from(value, (character) => character.charCodeAt(0));
+  const bytes = readByteString(headers.get("subject") ?? "");
   const utf8Subject = decodeText(bytes, "utf-8");
   return decodeHeader(utf8Subject.includes("�") ? decodeText(bytes, "windows-1252") : utf8Subject);
 }

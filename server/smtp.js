@@ -40,14 +40,16 @@ export function createSmtpServer(config, store, tls, resolveDns) {
         }
 
         const raw = Buffer.concat(chunks, size);
+        const authStartedAt = performance.now();
         const identity = await authenticate(raw, {
           envelopeFrom: session.envelope.mailFrom.address,
           ip: session.remoteAddress,
           helo: session.hostNameAppearsAs,
         });
+        const authMs = Math.round(performance.now() - authStartedAt);
         const result = store.enqueueIncoming({ ...identity, raw, subject: DEFAULT_PRESET.subject });
         if (result === "busy") throw temporaryFailure();
-        if (result === "queued") console.info("Authenticated digest queued", { method: identity.method });
+        if (result === "queued") console.info("Authenticated digest queued", { method: identity.method, authMs });
         done(null, result === "duplicate" ? "Digest already received" : "Digest queued");
       }
       receive().catch((error) => {

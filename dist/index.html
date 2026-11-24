@@ -23,22 +23,22 @@
         </div>
       </div>
       <nav class="workflow-nav" aria-label="Digest workflow">
-        <a href="#manual" data-workflow="manual" aria-current="page">Manual</a>
-        <a href="#automatic" data-workflow="automatic">Automatic</a>
+        <a href="#automatic" data-workflow="automatic" aria-current="page">Automatic</a>
+        <a href="#manual" data-workflow="manual">Manual</a>
       </nav>
-      <span class="privacy-note" id="privacy-note"><i class="icon icon-lock" aria-hidden="true"></i> Processed in your browser</span>
+      <span class="privacy-note" id="privacy-note" hidden><i class="icon icon-lock" aria-hidden="true"></i> Processed in your browser</span>
     </div>
   </header>
 
   <main class="workspace-shell" id="main" tabindex="-1">
-    <div id="manual-view">
+    <noscript><p class="error">Enable JavaScript to use Digest Bot.</p></noscript>
+    <div id="manual-view" hidden>
       <div class="intro">
         <h1>Format a news digest</h1>
         <p>In SharePoint, email a news digest to your inbox. Then add the saved email here.</p>
       </div>
 
       <section class="workspace panel" aria-label="Format an email file">
-        <noscript><p class="error">Enable JavaScript to format an email in your browser.</p></noscript>
         <input type="file" accept=".eml,message/rfc822" id="file-input" hidden>
         <div class="drop-zone" id="drop-zone" aria-busy="false">
           <span class="drop-icon" aria-hidden="true"><i id="drop-icon" class="icon icon-upload"></i></span>
@@ -81,14 +81,14 @@
       </details>
     </div>
 
-    <section id="automatic-view" aria-labelledby="automatic-title" hidden>
+    <section id="automatic-view" aria-labelledby="automatic-title">
       <div class="intro">
         <h1 id="automatic-title">Email a news digest</h1>
         <p>In SharePoint, choose <strong>Email a news digest</strong> and paste the group address into <strong>To</strong>.</p>
       </div>
 
       <div class="panel workspace">
-        <p class="automatic-feedback" id="automatic-feedback" role="status">Loading the group address…</p>
+        <p class="automatic-feedback" id="automatic-feedback" role="status"></p>
         <div id="automatic-address" hidden>
           <label class="address-label" for="group-address">Microsoft 365 group address</label>
           <div class="address-actions">
@@ -103,7 +103,7 @@
   </main>
   <footer class="workspace-shell app-footer">
     <span>Author: Joshua Lavagna-Slater</span>
-    <span class="version">v1.1.2</span>
+    <span class="version">v1.1.3</span>
   </footer>
 </body>
 </html>

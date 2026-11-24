@@ -4,6 +4,12 @@ import { SendEmailCommand, SESv2Client } from "@aws-sdk/client-sesv2";
 import { formatDigest, readDigest } from "../dist/core/digest.js";
 import { linkDestination } from "../dist/core/sharepoint.js";
 
+const queuePollIntervalMs = 500;
+const pruneIntervalMs = 60_000;
+const sesTimeoutMs = 25_000;
+const retryDelayMs = 15_000;
+const maxThrottleRetries = 2;
+
 export function createSesTransport(region) {
   // Retry only explicit throttling responses in the queue. A timeout can mean
   // that SES has already accepted the message.
@@ -14,7 +20,7 @@ export function createSesTransport(region) {
         FromEmailAddress: from,
         Destination: { ToAddresses: [recipient] },
         Content: { Raw: { Data: raw } },
-      }), { abortSignal: AbortSignal.timeout(25_000) });
+      }), { abortSignal: AbortSignal.timeout(sesTimeoutMs) });
     },
     close() {
       client.destroy();
@@ -22,14 +28,15 @@ export function createSesTransport(region) {
   };
 }
 
-function hostedBy(url, hosts) {
+function isAllowedSharePointUrl(url, hosts) {
   const { hostname, protocol } = new URL(linkDestination(url));
-  return protocol === "https:" && (hosts.length ? hosts.includes(hostname) : hostname.endsWith(".sharepoint.com"));
+  if (protocol !== "https:") return false;
+  return hosts.length ? hosts.includes(hostname) : hostname.endsWith(".sharepoint.com");
 }
 
 export function startDeliveryWorker(config, store, transport, log = console) {
   // JSDOM gets no script execution or external resource loader.
-  const browser = new JSDOM("");
+  const { window } = new JSDOM("");
   const logo = {
     kind: "inline",
     type: "image/png",
@@ -40,51 +47,60 @@ export function startDeliveryWorker(config, store, transport, log = console) {
   let nextPrune = 0;
 
   async function deliver(job) {
+    const queueMs = Math.max(0, Date.now() - job.queuedAt);
+    const formatStartedAt = performance.now();
     let raw;
     try {
-      const digest = readDigest(job.raw, browser.window.document, { inferRecipient: false });
-      if (!digest.articles.every((article) => hostedBy(article.href, sharepointHosts))) {
+      const digest = readDigest(job.raw, window.document, { inferRecipient: false });
+      if (!digest.articles.every((article) => isAllowedSharePointUrl(article.href, sharepointHosts))) {
         store.finish(job.id, "failed", "source_host");
         log.warn("Digest contained an unsupported SharePoint news link");
         return;
       }
-      if (digest.siteUrl && !hostedBy(digest.siteUrl, sharepointHosts)) digest.siteUrl = "";
+      if (digest.siteUrl && !isAllowedSharePointUrl(digest.siteUrl, sharepointHosts)) digest.siteUrl = "";
       for (const article of digest.articles) {
         // Do not turn an incoming external image URL into a tracking request.
-        if (article.image?.kind === "remote" && !hostedBy(article.image.url, sharepointHosts)) article.image = null;
+        if (article.image?.kind === "remote" && !isAllowedSharePointUrl(article.image.url, sharepointHosts)) {
+          article.image = null;
+        }
       }
-      raw = Buffer.from(formatDigest(digest, { from, subject: job.subject, recipient: job.recipient },
-        new Date(), logo, { automatic: true }));
+      const preset = { from, subject: job.subject, recipient: job.recipient };
+      raw = Buffer.from(formatDigest(digest, preset, new Date(), logo, { automatic: true }));
     } catch {
       store.finish(job.id, "failed", "format");
       log.warn("Authenticated email did not contain a readable SharePoint digest");
       return;
     }
 
+    const formatMs = Math.round(performance.now() - formatStartedAt);
     store.sending(job.id);
+    const sesStartedAt = performance.now();
+    let response;
     try {
-      await transport.send({ from, recipient: job.recipient, raw });
+      response = await transport.send({ from, recipient: job.recipient, raw });
     } catch (error) {
+      const sesMs = Math.round(performance.now() - sesStartedAt);
       const status = error.$metadata?.httpStatusCode;
-      if (status === 429 && job.attempts < 2) {
-        store.retry(job.id, 15_000 * (job.attempts + 1));
+      if (status === 429 && job.attempts < maxThrottleRetries) {
+        store.retry(job.id, retryDelayMs * (job.attempts + 1));
       } else if (status >= 400 && status < 500 && status !== 408) {
         store.finish(job.id, "failed", status === 429 ? "provider_limit" : "provider_rejected");
       } else {
         store.finish(job.id, "uncertain", "unconfirmed");
       }
-      log.warn("Digest delivery returned an error", { status: status ?? "unconfirmed" });
+      log.warn("Digest delivery returned an error", { status: status ?? "unconfirmed", queueMs, formatMs, sesMs });
       return;
     }
+    const sesMs = Math.round(performance.now() - sesStartedAt);
     store.finish(job.id, "sent");
-    log.info("Formatted digest accepted by SES");
+    log.info("Formatted digest accepted by SES", { queueMs, formatMs, sesMs, messageId: response?.MessageId });
   }
 
   async function tick() {
     const now = Date.now();
     if (now >= nextPrune) {
       store.prune(now);
-      nextPrune = now + 60_000;
+      nextPrune = now + pruneIntervalMs;
     }
     const job = store.claim(now);
     if (job) await deliver(job);
@@ -99,11 +115,11 @@ export function startDeliveryWorker(config, store, transport, log = console) {
       clearInterval(interval);
       config.onWorkerError?.();
     }).finally(() => { running = undefined; });
-  }, 500);
+  }, queuePollIntervalMs);
 
   return async () => {
     clearInterval(interval);
     await running;
-    browser.window.close();
+    window.close();
   };
 }

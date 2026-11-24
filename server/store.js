@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
-const hours = 60 * 60 * 1000;
-const retention = 24 * hours;
-const automaticRetention = 7 * retention;
+const hourMs = 60 * 60 * 1000;
+const dayMs = 24 * hourMs;
+const automaticRetentionMs = 7 * dayMs;
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
 export function openStore(path) {
@@ -26,6 +26,8 @@ export function openStore(path) {
       reason TEXT
     ) STRICT;
     CREATE INDEX IF NOT EXISTS jobs_state ON jobs (state, available_at, created_at);
+    CREATE INDEX IF NOT EXISTS jobs_created_at ON jobs (created_at);
+    CREATE INDEX IF NOT EXISTS jobs_recipient_created_at ON jobs (recipient, created_at);
   `);
 
   // Retain the original column layout so pending jobs and the existing database survive upgrades.
@@ -41,7 +43,15 @@ export function openStore(path) {
   const claim = db.prepare(`
     UPDATE jobs SET state = 'processing'
     WHERE id = (SELECT id FROM jobs WHERE state = 'queued' AND available_at <= ? ORDER BY created_at, id LIMIT 1)
-    RETURNING id, recipient, subject, raw, attempts
+    RETURNING id, recipient, subject, raw, attempts, created_at AS queuedAt
+  `);
+  const markSending = db.prepare("UPDATE jobs SET state = 'sending', attempts = attempts + 1 WHERE id = ?");
+  const scheduleRetry = db.prepare("UPDATE jobs SET state = 'queued', available_at = ? WHERE id = ?");
+  const finishJob = db.prepare("UPDATE jobs SET state = ?, reason = ?, raw = NULL WHERE id = ?");
+  const expireWaiting = db.prepare("UPDATE jobs SET state = 'expired' WHERE state = 'waiting' AND expires_at <= ?");
+  const deleteExpired = db.prepare(`
+    DELETE FROM jobs
+    WHERE expires_at < ? AND state NOT IN ('queued', 'processing', 'sending')
   `);
 
   return {
@@ -53,8 +63,10 @@ export function openStore(path) {
     },
     enqueueIncoming({ recipient, messageId, subject, raw }, now = Date.now()) {
       const id = hash(recipient + "\0" + messageId);
-      const expiresAt = now + automaticRetention - retention;
-      const result = accept.run(id, recipient, subject, now, expiresAt, now, raw, now - hours, recipient, now - hours);
+      // Pruning allows one day after expires_at, including for older queue records.
+      const expiresAt = now + automaticRetentionMs - dayMs;
+      const rateLimitSince = now - hourMs;
+      const result = accept.run(id, recipient, subject, now, expiresAt, now, raw, rateLimitSince, recipient, rateLimitSince);
       if (result.changes) return "queued";
       return find.get(id) ? "duplicate" : "busy";
     },
@@ -62,17 +74,17 @@ export function openStore(path) {
       return claim.get(now);
     },
     sending(id) {
-      db.prepare("UPDATE jobs SET state = 'sending', attempts = attempts + 1 WHERE id = ?").run(id);
+      markSending.run(id);
     },
     retry(id, delay, now = Date.now()) {
-      db.prepare("UPDATE jobs SET state = 'queued', available_at = ? WHERE id = ?").run(now + delay, id);
+      scheduleRetry.run(now + delay, id);
     },
     finish(id, state, reason = null) {
-      db.prepare("UPDATE jobs SET state = ?, reason = ?, raw = NULL WHERE id = ?").run(state, reason, id);
+      finishJob.run(state, reason, id);
     },
     prune(now = Date.now()) {
-      db.prepare("UPDATE jobs SET state = 'expired' WHERE state = 'waiting' AND expires_at <= ?").run(now);
-      db.prepare("DELETE FROM jobs WHERE expires_at < ? AND state NOT IN ('queued', 'processing', 'sending')").run(now - retention);
+      expireWaiting.run(now);
+      deleteExpired.run(now - dayMs);
     },
     close() {
       db.close();

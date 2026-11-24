@@ -1,6 +1,6 @@
 # Enable automatic digests on your existing EC2 server
 
-Digest Bot v1.1.2 has public **Manual** and **Automatic** tabs. Automatic displays the Microsoft 365 group address. A user sends a SharePoint news digest to the group and receives the formatted version in their original inbox. The bot uses SQLite to track which messages it has processed.
+Digest Bot opens on the **Automatic** tab, which shows the Microsoft 365 group address. A user sends a SharePoint news digest to that group and receives the formatted version in their original inbox. The bot uses SQLite to track which messages it has processed. [Illustrated workflow](../docs/how-it-works.md)
 
 | Address | Where to use it |
 | --- | --- |
@@ -19,14 +19,14 @@ Microsoft documents that group guests receive conversations by email. Test **Ema
 
 ## 2. Update the Digest Bot checkout and `.env`
 
-SSH into the existing EC2 instance. Use the app directory from the original setup. The commands below use the `digest-bot-public` branch. Once the update is merged, use `main`.
+SSH into the existing EC2 instance. Use the app directory from the original setup and pull the latest release from `main`.
 
 ```bash
 cd ~/bond-sdc/bond-digest-bot
 git status --short
 git fetch origin
-git switch digest-bot-public
-git pull --ff-only
+git switch main
+git pull --ff-only origin main
 sudo nano .env
 ```
 
@@ -102,6 +102,8 @@ sudo docker compose -f compose.yaml -f compose.delivery.yaml logs --tail=80 dige
 | **Digest delivery returned an error** with status `403` | Check that the attached EC2 role allows `ses:SendRawEmail` for the verified sender identity using the [policy template](iam-ses-send.template.json). |
 | **Authenticated digest queued** followed by another SES error | Check the SES region, sender identity, role policy, sandbox status and metadata hop limit. |
 | **Formatted digest accepted by SES** | Check the recipient’s inbox, Junk Email and Exchange quarantine. SES acceptance records a successful handoff. |
+
+Accepted sends include time spent in the queue, formatting and the SES request, plus the SES message ID. [How to read the timings](../docs/how-it-works.md#where-delivery-time-goes)
 
 The bot replies to the authenticated `From` address. It records the Message-ID or verified signature key for seven days to suppress repeat deliveries, and clears the source content when a job reaches a final state. [Microsoft DKIM documentation](https://learn.microsoft.com/en-us/defender-office-365/email-authentication-dkim-configure) · [Exchange message trace](https://learn.microsoft.com/en-us/exchange/monitoring/trace-an-email-message/message-trace-modern-eac)
 

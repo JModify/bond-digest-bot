@@ -4,6 +4,7 @@ const datePattern = /^(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}
 const viewPattern = /^[\d.,\s]+\s+views?$/i;
 const bylinePattern = /(?:author|byline)/i;
 const siteLinkPattern = /^(?:go to (?:the )?site|view (?:the )?site|visit (?:the )?site|view all news and upcoming events)$/i;
+const articleRowSelector = "tr, article, [role=listitem]";
 
 function textOf(element) {
   return (element?.textContent || "").replace(/\s+/g, " ").trim();
@@ -74,8 +75,7 @@ function readMetadata(fields) {
   return details;
 }
 
-function readThumbnail(anchor, title, inlineImages) {
-  const row = anchor.closest("tr, article, [role=listitem]");
+function readThumbnail(row, title, inlineImages) {
   const images = Array.from(row?.querySelectorAll("img") || []);
   const image = images.find((candidate) => candidate.alt.trim().toLowerCase() === title.toLowerCase()) ||
     images.find((candidate) => candidate.getAttribute("src") && candidate.width !== 1);
@@ -99,13 +99,18 @@ function htmlArticles(root, inlineImages) {
     if (!href || !title || siteLinkPattern.test(title)) continue;
     const destination = linkDestination(href);
     if (seen.has(destination)) continue;
-    const fields = articleFields(anchor);
-    const details = readMetadata(fields);
-    const structuredRow = Boolean(anchor.closest("tr, article, [role=listitem]")) && Boolean(details.date || details.views);
-    if (!isNewsPage(destination) && !structuredRow) continue;
+
+    const newsPage = isNewsPage(destination);
+    const row = anchor.closest(articleRowSelector);
+    if (!newsPage && !row) continue;
+    const details = readMetadata(articleFields(anchor));
+    if (!newsPage && !details.date && !details.views) continue;
 
     seen.add(destination);
-    candidates.push({ anchor, article: { title, href, ...details, image: readThumbnail(anchor, title, inlineImages) } });
+    candidates.push({
+      anchor,
+      article: { title, href, ...details, image: readThumbnail(row, title, inlineImages) },
+    });
   }
   return candidates;
 }
