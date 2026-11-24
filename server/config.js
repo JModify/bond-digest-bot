@@ -20,6 +20,13 @@ export function loadConfig(env = process.env) {
   if (origin.protocol !== "https:" || origin.href !== origin.origin + "/") {
     throw new Error("DIGEST_PUBLIC_ORIGIN must be an HTTPS origin without a path.");
   }
+  const emailDeliveryEnabled = env.DIGEST_EMAIL_DELIVERY_ENABLED === "true";
+  const webConfig = { origin: origin.origin, emailDeliveryEnabled };
+  if (!emailDeliveryEnabled) return webConfig;
+
+  const groupAddress = normaliseAddress(env.DIGEST_GROUP_ADDRESS).toLowerCase();
+  if (!groupAddress) throw new Error("Set DIGEST_GROUP_ADDRESS to the Microsoft 365 group email address.");
+  const inboxDomain = hostname(env.DIGEST_INBOX_DOMAIN ?? "inbox.bond-sdc.com", "DIGEST_INBOX_DOMAIN");
   const allowedRecipients = list(env.DIGEST_ALLOWED_RECIPIENTS);
   const recipientDomains = list(env.DIGEST_ALLOWED_RECIPIENT_DOMAINS);
   if (!allowedRecipients.length && !recipientDomains.length) {
@@ -36,8 +43,9 @@ export function loadConfig(env = process.env) {
   }
   const tlsDir = env.DIGEST_TLS_DIR ?? "./var/smtp-tls";
   return {
-    origin: origin.origin,
-    inboxDomain: hostname(env.DIGEST_INBOX_DOMAIN ?? "inbox.bond-sdc.com", "DIGEST_INBOX_DOMAIN"),
+    ...webConfig,
+    groupAddress,
+    inboxAddress: "digest@" + inboxDomain,
     mailHost: hostname(env.DIGEST_MAIL_HOST ?? "mail.bond-sdc.com", "DIGEST_MAIL_HOST"),
     from,
     allowedRecipients,

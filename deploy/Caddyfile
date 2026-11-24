@@ -29,7 +29,7 @@ digest.bond-sdc.com {
 	}
 }
 
-# Caddy issues the certificate here. Digest Bot uses it for SMTP STARTTLS.
-mail.bond-sdc.com {
-	respond 404
+(no_mail_delivery) {
 }
+
+import {$DIGEST_MAIL_CONFIG:no_mail_delivery}

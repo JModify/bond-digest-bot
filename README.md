@@ -1,16 +1,14 @@
-# Digest Bot v1.0.3
+# Digest Bot v1.1.0
 
-Digest Bot formats SharePoint news emails using the Bond Staff News layout.
+Digest Bot formats SharePoint news digests in the Bond Staff News layout with a Brisbane-date subject.
 
-- **Email delivery.** Save the subject preset, enter the return address, then copy the temporary address and title into SharePoint. Digest Bot receives the message via SMTP and sends the formatted digest back through Amazon SES.
-- **Workspace.** Upload a SharePoint `.eml` to preview and download it as a viewing copy or as an editable Outlook draft. The manual From and To settings apply to these downloads.
+- **Manual.** Send a SharePoint news digest to your own Bond inbox. In Outlook, choose **More actions → Save as** and drop the `.eml` into Digest Bot. Download the formatted email, open it in Outlook and choose **Forward**. The file sets the From header to `bondstaffnews@bond.edu.au` and leaves the recipient blank. The browser processes the file locally.
+- **Automatic.** Copy the Microsoft 365 group address from the **Automatic** tab and use it in SharePoint’s **To** field. The group forwards the email to the bot’s fixed SMTP address. The bot verifies the original sender, formats the digest and replies through Amazon SES.
+
+[Opening a saved .eml in new Outlook](https://support.microsoft.com/en-us/outlook/mail/open-eml-msg-and-oft-files-in-new-outlook-and-outlook-on-the-web)
 
 ## Deploy and test
 
-Follow the [EC2 setup guide](deploy/EC2.md) to run both applications with one Docker Compose project. The Service Desk Central container serves the public site and manages HTTPS. The Digest Bot container runs the web app, the incoming mail listener and the Amazon SES delivery worker.
+Follow the [EC2 setup guide](deploy/EC2.md) to run Service Desk Central and Digest Bot with Docker Compose. See [Enable automatic digests on EC2](deploy/email-delivery.md) for the Microsoft 365 group, DNS, SES and upgrade steps. Automatic delivery is enabled by adding `compose.delivery.yaml` to the Compose command.
 
-Run `npm ci` and `npm test` with Node.js 24+ to exercise the HTTP, SMTP, processing and export flows. The tests use an in-process delivery transport. To test just the manual interface, serve the `dist/` directory with a static web server.
-
-## Formatting pipeline
-
-The browser workspace and mail worker share the parser, preset and email renderer in `dist/core/`. The EC2 process stores time-limited requests and queued messages in SQLite. The outgoing mail adapter uses the EC2 instance role.
+To run the manual formatter locally, use `npm start` on Node.js 24+ and open `http://localhost:8080`. Run `npm ci` and `npm test` to exercise the manual export, HTTP and signed SMTP flow. Tests use an in-process mail transport.
