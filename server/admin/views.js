@@ -129,8 +129,6 @@ export function systemPage(user, { pending, paused, activity, update, settings, 
   const updateAvailable = !runningUpdate && !["disabled", "unavailable"].includes(update.state);
   const updateForm = updateAvailable ? `<div class="inline-form">${post("system/update", "", submit("Pull latest and restart sites"))}
     ${post("system/restart", "", submit("Rebuild current code", "secondary"))}</div>` : "";
-  const rebootForm = instanceId && !runningUpdate
-    ? post("system/reboot", '<label>Type REBOOT to confirm<input name="confirmation" maxlength="6" required autocomplete="off"></label>', submit("Reboot EC2", "danger"), "inline-form") : "";
   const activityRows = activity.map(({ at, actor, action, detail }) => `<tr><td>${time(at)}</td><td>${esc(actor)}</td><td>${esc(action)}</td><td>${esc(detail)}</td></tr>`).join("");
   return page("System", `<h1>System</h1>
     <section class="panel"><h2>Digest Bot</h2>
@@ -142,8 +140,28 @@ export function systemPage(user, { pending, paused, activity, update, settings, 
         ${update.updatedAt ? `<p>Last update ${time(update.updatedAt)}</p>` : ""}${updateForm}
       </section>
       ${environmentSettings(settings, updateAvailable, pending !== undefined)}
-      <section class="panel"><h2>EC2 reboot</h2>${instanceId ? `<p>Reboots <code>${esc(instanceId)}</code> and temporarily interrupts both sites and mail processing.</p>${rebootForm}` : "<p>Configure the instance ID and AWS role permission to enable reboot.</p>"}</section>
+      ${rebootPanel(instanceId, settings?.SDC_ADMIN_EC2_INSTANCE_ID, runningUpdate, updateAvailable)}
       <section class="panel"><h2>Recent admin activity</h2>${activityRows ? table(["Brisbane time", "User", "Action", "Details"], activityRows) : "<p>No admin activity yet.</p>"}</section>` : ""}`, { user, current: "system", notice });
+}
+
+function rebootPanel(instanceId, savedId, runningUpdate, updateAvailable) {
+  let content;
+  if (instanceId) {
+    const controls = runningUpdate
+      ? "<p>Wait for site maintenance to finish before rebooting.</p>"
+      : post("system/reboot", '<label>Type REBOOT to confirm<input name="confirmation" maxlength="6" required autocomplete="off"></label>', submit("Reboot EC2", "danger"), "inline-form");
+    content = `<p>Reboots <code>${esc(instanceId)}</code> and temporarily interrupts both sites and mail processing.</p>${controls}`;
+  } else if (savedId) {
+    const nextStep = runningUpdate
+      ? "Wait for the host request to finish and refresh this page."
+      : updateAvailable
+        ? "Select <strong>Rebuild current code</strong> under Site updates to apply it."
+        : "Recreate the Digest Bot container with Docker Compose to apply it.";
+    content = `<p><code>${esc(savedId)}</code> is saved in <code>.env</code> and is waiting to be applied. ${nextStep}</p>`;
+  } else {
+    content = "<p>The running Digest Bot container has an empty <code>SDC_ADMIN_EC2_INSTANCE_ID</code>. Set it in <code>.env</code> and recreate the Digest Bot container.</p>";
+  }
+  return `<section class="panel"><h2>EC2 reboot</h2>${content}</section>`;
 }
 
 function environmentSettings(settings, available, automatic) {

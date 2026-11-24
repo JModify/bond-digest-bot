@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { DatabaseSync } from "node:sqlite";
 import { hashPassword, openAccounts } from "../server/admin/accounts.js";
 import { createAdminPanel } from "../server/admin/routes.js";
+import { systemPage } from "../server/admin/views.js";
 import { loadConfig } from "../server/config.js";
 import { startDeliveryWorker } from "../server/delivery.js";
 import { createWebServer } from "../server/http.js";
@@ -25,6 +26,26 @@ const fixture = Buffer.from([
 ].join("\r\n"));
 const actionKey = "b0219890-7a66-49d5-9dbb-9532ab17e36a";
 const quiet = { error() {}, info() {}, warn() {} };
+
+test("shows whether the reboot instance ID has been applied to Digest Bot", () => {
+  const user = { username: "jlavagna", role: "owner" };
+  const instanceId = "i-0123456789abcdef0";
+  const state = { pending: 0, paused: false, activity: [], update: { state: "ready", detail: "Ready" } };
+
+  const missing = systemPage(user, state);
+  assert.match(missing, /running Digest Bot container has an empty <code>SDC_ADMIN_EC2_INSTANCE_ID/);
+  assert.doesNotMatch(missing, /action="\/admin\/system\/reboot"/);
+
+  const settings = { SDC_ADMIN_EC2_INSTANCE_ID: instanceId };
+  const saved = systemPage(user, { ...state, settings });
+  assert.match(saved, /saved in <code>\.env<\/code> and is waiting to be applied/);
+  assert.match(saved, /Select <strong>Rebuild current code<\/strong>/);
+  assert.doesNotMatch(saved, /action="\/admin\/system\/reboot"/);
+
+  const applied = systemPage(user, { ...state, settings, instanceId });
+  assert.match(applied, /Reboots <code>i-0123456789abcdef0<\/code>/);
+  assert.match(applied, /action="\/admin\/system\/reboot"/);
+});
 
 async function waitFor(read, expected) {
   for (let i = 0; i < 50; i++) {

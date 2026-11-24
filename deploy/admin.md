@@ -60,5 +60,14 @@ The panel submits fixed requests to a host `systemd` service. The container can 
 ## Enable EC2 reboot
 
 1. Add [the instance-scoped policy](admin/iam-reboot-instance.template.json) to the existing EC2 IAM role. Fill in the AWS account and instance IDs and confirm the region. `RebootInstances` queues the reboot request in AWS. [AWS API reference](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_RebootInstances.html)
-2. Set `SDC_ADMIN_EC2_INSTANCE_ID` in `.env` or save it under **System → Environment settings**. Rebuild the stack to apply it.
+2. Set `SDC_ADMIN_EC2_INSTANCE_ID` in `.env` or save it under **System → Environment settings**. Select **Rebuild current code** under **System → Site updates** to apply it. From the terminal, `docker compose up` recreates the container with its updated environment. `docker compose restart` reuses its existing environment.
 3. Confirm `sudo systemctl is-enabled docker` prints `enabled` so the Compose restart policy can bring the containers up after reboot. Open **System**, type `REBOOT` and select **Reboot EC2** when you are ready for a brief outage.
+
+If the setup message still appears, check the running container from the Digest Bot checkout. This prints only the instance ID, or `(unset)`.
+
+```bash
+sudo docker compose -f compose.yaml -f compose.delivery.yaml -f compose.updater.yaml exec -T digest-bot \
+  node -p 'process.env.SDC_ADMIN_EC2_INSTANCE_ID?.trim() || "(unset)"'
+```
+
+If `.env` has an admin-managed settings block at the end, set the instance ID in that block. Compose uses its value when the same key appears earlier. The reboot form appears once the running container loads the ID. AWS evaluates the instance role's reboot permission when it receives the request.
