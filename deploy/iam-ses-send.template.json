@@ -7,9 +7,7 @@
       "Action": "ses:SendEmail",
       "Resource": "arn:aws:ses:ap-southeast-2:YOUR_AWS_ACCOUNT_ID:identity/bond-sdc.com",
       "Condition": {
-        "StringEquals": { "ses:FromAddress": "digest@bond-sdc.com" },
-        "ForAllValues:StringEquals": { "ses:Recipients": ["YOUR_VERIFIED_RETURN_ADDRESS"] },
-        "Null": { "ses:Recipients": "false" }
+        "StringEquals": { "ses:FromAddress": "digest@bond-sdc.com" }
       }
     }
   ]

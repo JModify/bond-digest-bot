@@ -14,9 +14,6 @@ www.bond-sdc.com {
 }
 
 digest.bond-sdc.com {
-	basic_auth {
-		{$DIGEST_AUTH_USER} {$DIGEST_AUTH_HASH}
-	}
 	request_body {
 		max_size 16KiB
 	}

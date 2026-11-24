@@ -23,7 +23,6 @@ import { openStore } from "../server/store.js";
 const config = loadConfig({
   DIGEST_EMAIL_DELIVERY_ENABLED: "true",
   DIGEST_GROUP_ADDRESS: "staff-news@example.org",
-  DIGEST_ALLOWED_RECIPIENTS: "staff@example.org",
 });
 const sender = "staff@example.org";
 const sourceDigest = `From: Staff Member <${sender}>\r\nReply-To: another@example.net\r\nTo: ${config.groupAddress}\r\nMessage-ID: <news-1@example.org>\r\nSubject: SharePoint digest\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<html><body><table><tr><td>
@@ -37,13 +36,15 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", {
 });
 const keyRecord = "v=DKIM1; k=rsa; p=" + publicKey.toString("base64");
 const resolveKey = async (name) => {
-  if (name === "test._domainkey.example.org") return [[keyRecord]];
+  if (["test._domainkey.example.org", "test._domainkey.example.net"].includes(name)) return [[keyRecord]];
+  if (name === "example.org") return [["v=spf1 ip4:127.0.0.1 -all"]];
+  if (name === "open.example.net") return [["v=spf1 +all"]];
   throw Object.assign(new Error("No DKIM key"), { code: name.startsWith("timeout.") ? "ETIMEOUT" : "ENODATA" });
 };
 
-async function sign(raw, { headerList, selector = "test" } = {}) {
+async function sign(raw, { headerList, signingDomain = "example.org", selector = "test" } = {}) {
   const { signatures, errors } = await dkimSign(Buffer.from(raw, "latin1"), {
-    signatureData: [{ signingDomain: "example.org", selector, privateKey }],
+    signatureData: [{ signingDomain, selector, privateKey }],
     headerList,
   });
   assert.deepEqual(errors, []);
@@ -70,9 +71,9 @@ async function smtpClient(port) {
   assert.match(await command("EHLO example.net"), /^250 /);
   return {
     command,
-    async send(raw) {
+    async send(raw, envelopeFrom = "forward+SRS=example.org=staff@relay.example.net") {
       // Microsoft 365 can rewrite the envelope while leaving the signed From intact.
-      assert.match(await command("MAIL FROM:<forward+SRS=example.org=staff@relay.example.net>"), /^250 /);
+      assert.match(await command(`MAIL FROM:<${envelopeFrom}>`), /^250 /);
       assert.match(await command(`RCPT TO:<${config.inboxAddress}>`), /^250 /);
       assert.match(await command("DATA"), /^354 /);
       const data = Buffer.from(raw.replace(/(^|\r\n)\./g, "$1..").replace(/\r\n$/, "") + "\r\n.\r\n", "latin1");
@@ -90,7 +91,7 @@ function exampleDigest() {
     .replace(/^From:[^\r\n]*(?:\r\n[ \t][^\r\n]*)*/mi, `From: Staff Member <${sender}>`);
 }
 
-test("accepts a digest at the fixed inbox and returns one formatted reply to the signed From", async (t) => {
+test("returns digests once to authenticated senders from different organisations", async (t) => {
   const store = openStore(":memory:");
   const accepted = [];
   const smtp = createSmtpServer(config, store, undefined, resolveKey);
@@ -124,6 +125,14 @@ test("accepts a digest at the fixed inbox and returns one formatted reply to the
   assert.match(rendered.html, /View all news and upcoming events/);
   assert.equal(rendered.images.size, process.env.DIGEST_TEST_EML ? 3 : 1);
   assert.match(message.raw.toString(), /\r\nAuto-Submitted: auto-replied\r\n/);
+
+  const otherSender = "staff@example.net";
+  const otherDigest = sourceDigest.replace(sender, otherSender).replace("bonduni.sharepoint.com", "sampletenant.sharepoint.com");
+  assert.match(await client.send(await sign(otherDigest, { signingDomain: "example.net" })), /^250 Digest queued/);
+  for (let attempt = 0; attempt < 50 && accepted.length < 2; attempt += 1) await delay(50);
+  assert.equal(accepted.length, 2);
+  assert.equal(accepted[1].recipient, otherSender);
+  assert.match(parseEmail(accepted[1].raw).html, /sampletenant\.sharepoint\.com/);
 });
 
 test("rejects unauthenticated, mismatched or altered From fields before creating a job", async (t) => {
@@ -138,14 +147,40 @@ test("rejects unauthenticated, mismatched or altered From fields before creating
     store.close();
   });
 
-  assert.match(await client.send("Authentication-Results: example.org; dkim=pass\r\n" + sourceDigest), /^550 .*DKIM/);
-  assert.match(await client.send(await sign(sourceDigest.replace(sender, "other@example.org"))), /^550 .*not approved/);
+  assert.match(await client.send("Authentication-Results: example.org; dkim=pass\r\n" + sourceDigest), /^550 .*DKIM or SPF/);
+  assert.match(await client.send(await sign(sourceDigest.replace(sender, "other@example.net"))), /^550 .*DKIM or SPF/);
   const signed = await sign(sourceDigest);
   assert.match(await client.send("From: Staff Member <staff@example.org>\r\n" + signed), /^550 /);
   assert.match(await client.send(signed.replace("Sample summary.", "Edited summary.")), /^550 .*DKIM/);
-  const unsignedMessageId = await sign(sourceDigest, { headerList: ["from", "subject", "content-type"] });
-  assert.match(await client.send(unsignedMessageId), /^550 .*DKIM/);
-  assert.match(await client.send(await sign(sourceDigest, { selector: "timeout" })), /^451 .*DKIM/);
+  assert.match(await client.send(await sign(sourceDigest, { selector: "timeout" })), /^451 .*authentication/);
+  const autoReply = await sign("Auto-Submitted: auto-replied\r\n" + sourceDigest);
+  assert.match(await client.send(autoReply), /^550 .*automatic reply/);
+  assert.equal(store.claim(), undefined);
+});
+
+test("can use aligned SMTP SPF and uses the signature ID when DKIM leaves Message-ID unsigned", async (t) => {
+  const store = openStore(":memory:");
+  const smtp = createSmtpServer(config, store, undefined, resolveKey);
+  smtp.listen(0, "127.0.0.1");
+  await once(smtp.server, "listening");
+  const client = await smtpClient(smtp.server.address().port);
+  t.after(async () => {
+    client.close();
+    await new Promise((resolve) => smtp.close(resolve));
+    store.close();
+  });
+
+  const rewrittenEnvelope = "forward+SRS=example.org=staff@example.org";
+  assert.match(await client.send(sourceDigest, rewrittenEnvelope), /^250 Digest queued/);
+  assert.match(await client.send(sourceDigest, rewrittenEnvelope), /^250 Digest already received/);
+  assert.equal(store.claim().recipient, sender);
+
+  const openSpfMessage = sourceDigest.replace(sender, "staff@open.example.net");
+  assert.match(await client.send(openSpfMessage, "staff@open.example.net"), /^550 .*DKIM or SPF/);
+  const unsignedId = await sign(sourceDigest, { headerList: ["from", "subject", "content-type"] });
+  assert.match(await client.send(unsignedId), /^250 Digest queued/);
+  assert.match(await client.send(unsignedId.replace("<news-1@example.org>", "<news-2@example.org>")), /^250 Digest already received/);
+  assert.equal(store.claim().recipient, sender);
   assert.equal(store.claim(), undefined);
 });
 
@@ -205,7 +240,7 @@ test("the website exposes only the group address when automatic mode is configur
     const base = "http://127.0.0.1:" + web.address().port;
     const page = await (await fetch(base)).text();
     assert.match(page, /Drop your \.eml file here/);
-    assert.match(page, /v1\.1\.0/);
+    assert.match(page, /v1\.1\.1/);
     assert.doesNotMatch(page, /delivery-form|editor-form|Return email address/);
     assert.equal((await fetch(base + "/healthz")).status, 200);
     const settings = await fetch(base + "/api/email");

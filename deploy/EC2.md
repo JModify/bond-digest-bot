@@ -4,7 +4,7 @@ Use one Ubuntu server in **Asia Pacific (Sydney)** (`ap-southeast-2`). Docker Co
 
 | Container | What it does | Address |
 | --- | --- | --- |
-| `service-desk-central` | Caddy serves the static site, manages HTTPS and proxies the password-protected Digest Bot site. | `https://bond-sdc.com` and `https://www.bond-sdc.com` |
+| `service-desk-central` | Caddy serves the static site, manages HTTPS and proxies the public Digest Bot site. | `https://bond-sdc.com` and `https://www.bond-sdc.com` |
 | `digest-bot` | Node.js serves the formatter. Visitors format and download `.eml` files in their own browser. | `https://digest.bond-sdc.com` |
 
 The default deployment uses ports `80` and `443` for web traffic. [Enable automatic digests on EC2](email-delivery.md) to add the fixed SMTP inbox, the Microsoft 365 group and SES replies.
@@ -71,16 +71,10 @@ git clone https://github.com/JModify/bond-service-desk-central.git
 git clone https://github.com/JModify/bond-digest-bot.git
 cd bond-digest-bot
 sudo install -m 0600 .env.example .env
-sudo docker run --rm -it --entrypoint caddy caddy:2.11.9-alpine hash-password
+sudo nano .env
 ```
 
-Enter the Digest Bot website password twice. Copy the hash beginning with `$2`, open `sudo nano .env` and fill in these values. In Nano, press **Ctrl+O**, **Enter**, then **Ctrl+X** to save and exit.
-
-| Setting | Enter |
-| --- | --- |
-| `ACME_EMAIL` | An email address you check, used as the certificate account contact |
-| `DIGEST_AUTH_USER` | Your Digest Bot website username |
-| `DIGEST_AUTH_HASH` | The password hash inside the existing single quotes |
+Set `ACME_EMAIL` to an email address you check. In Nano, press **Ctrl+O**, **Enter**, then **Ctrl+X** to save and exit.
 
 Once the three DNS names resolve to the Elastic IP, run the following from `~/bond-sdc/bond-digest-bot`.
 
@@ -90,11 +84,11 @@ sudo docker compose up -d --build --wait
 sudo docker compose ps
 ```
 
-Open [Service Desk Central](https://bond-sdc.com/) and [Digest Bot](https://digest.bond-sdc.com/). Caddy may take a few minutes to obtain the first HTTPS certificates. Sign in to Digest Bot and check that a saved SharePoint `.eml` formats and downloads.
+Open Service Desk Central and Digest Bot. Caddy may take a few minutes to obtain the first HTTPS certificates. Check that anyone can open Digest Bot and that a saved SharePoint `.eml` formats and downloads. [Service Desk Central](https://bond-sdc.com/) · [Digest Bot](https://digest.bond-sdc.com/)
 
 ## Update both sites
 
-These commands update the manual deployment. If you use automatic delivery, follow the [v1.1.0 upgrade steps](email-delivery.md#2-update-the-digest-bot-checkout-and-env) and start with both Compose files. If you originally cloned the `docker-ec2` branches, switch both repositories to `main` before pulling.
+These commands update the manual deployment. If you use automatic delivery, follow the [upgrade steps](email-delivery.md#2-update-the-digest-bot-checkout-and-env) and start with both Compose files. If you originally cloned the `docker-ec2` branches, switch both repositories to `main` before pulling.
 
 ```bash
 cd ~/bond-sdc/bond-digest-bot
@@ -111,6 +105,6 @@ The standard Compose command publishes only the web ports. It uses the existing 
 | Symptom | Check |
 | --- | --- |
 | HTTPS certificate error | Confirm the three A records and ports `80` and `443` in the EC2 security group. Run `sudo docker compose logs --tail=80 service-desk-central`. |
-| Digest Bot login rejected | Check the username and the single-quoted hash in `.env`. Run `sudo docker compose up -d` after editing. |
+| Old Digest Bot password prompt | Check out the public release and recreate the Caddy container with the Compose files you use for deployment. |
 | Port already in use | Check for an older web server on ports `80` or `443`. |
 | Outlook drag doesn’t provide an email file | Open the message in new Outlook, choose **More actions → Save as**, then drag the saved `.eml` from its folder. |

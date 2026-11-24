@@ -3,7 +3,6 @@ import { JSDOM } from "jsdom";
 import { SendEmailCommand, SESv2Client } from "@aws-sdk/client-sesv2";
 import { formatDigest, readDigest } from "../dist/core/digest.js";
 import { linkDestination } from "../dist/core/sharepoint.js";
-import { recipientAllowed } from "./config.js";
 
 export function createSesTransport(region) {
   // Retry only explicit throttling responses in the queue. A timeout can mean
@@ -24,7 +23,8 @@ export function createSesTransport(region) {
 }
 
 function hostedBy(url, hosts) {
-  return hosts.includes(new URL(linkDestination(url)).hostname);
+  const { hostname, protocol } = new URL(linkDestination(url));
+  return protocol === "https:" && (hosts.length ? hosts.includes(hostname) : hostname.endsWith(".sharepoint.com"));
 }
 
 export function startDeliveryWorker(config, store, transport, log = console) {
@@ -40,17 +40,12 @@ export function startDeliveryWorker(config, store, transport, log = console) {
   let nextPrune = 0;
 
   async function deliver(job) {
-    if (!recipientAllowed(job.recipient, config)) {
-      store.finish(job.id, "failed", "recipient");
-      return;
-    }
-
     let raw;
     try {
       const digest = readDigest(job.raw, browser.window.document, { inferRecipient: false });
       if (!digest.articles.every((article) => hostedBy(article.href, sharepointHosts))) {
         store.finish(job.id, "failed", "source_host");
-        log.warn("Digest contained a news link outside the configured SharePoint site");
+        log.warn("Digest contained an unsupported SharePoint news link");
         return;
       }
       if (digest.siteUrl && !hostedBy(digest.siteUrl, sharepointHosts)) digest.siteUrl = "";

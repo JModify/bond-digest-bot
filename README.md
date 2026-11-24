@@ -1,9 +1,11 @@
-# Digest Bot v1.1.0
+# Digest Bot v1.1.1
 
 Digest Bot formats SharePoint news digests in the Bond Staff News layout with a Brisbane-date subject.
 
-- **Manual.** Send a SharePoint news digest to your own Bond inbox. In Outlook, choose **More actions → Save as** and drop the `.eml` into Digest Bot. Download the formatted email, open it in Outlook and choose **Forward**. The file sets the From header to `bondstaffnews@bond.edu.au` and leaves the recipient blank. The browser processes the file locally.
-- **Automatic.** Copy the Microsoft 365 group address from the **Automatic** tab and use it in SharePoint’s **To** field. The group forwards the email to the bot’s fixed SMTP address. The bot verifies the original sender, formats the digest and replies through Amazon SES.
+- **Manual.** Send a SharePoint news digest to your inbox. In Outlook, choose **More actions → Save as** and drop the `.eml` into Digest Bot. Download the formatted email, open it in Outlook and choose **Forward**. The file sets the From header to `bondstaffnews@bond.edu.au` and leaves the recipient blank. The browser processes the file locally.
+- **Automatic.** Copy the Microsoft 365 group address from the **Automatic** tab and use it in SharePoint’s **To** field. The group forwards the email to the bot’s fixed SMTP address. Digest Bot accepts authenticated senders from any domain, formats the digest and replies through Amazon SES.
+
+Both tabs are public. Automatic replies use the original From address after a passing, domain-aligned DKIM or SPF check.
 
 [Opening a saved .eml in new Outlook](https://support.microsoft.com/en-us/outlook/mail/open-eml-msg-and-oft-files-in-new-outlook-and-outlook-on-the-web)
 

@@ -6,8 +6,6 @@ services:
     restart: unless-stopped
     environment:
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
-      DIGEST_AUTH_USER: ${DIGEST_AUTH_USER:-josh}
-      DIGEST_AUTH_HASH: ${DIGEST_AUTH_HASH:?Set DIGEST_AUTH_HASH in .env}
     ports:
       - "80:80"
       - "443:443"

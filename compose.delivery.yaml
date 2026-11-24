@@ -27,7 +27,6 @@ services:
       DIGEST_EMAIL_DELIVERY_ENABLED: "true"
       AWS_REGION: ap-southeast-2
       DIGEST_GROUP_ADDRESS: ${DIGEST_GROUP_ADDRESS:?Set DIGEST_GROUP_ADDRESS to the Microsoft 365 group email}
-      DIGEST_ALLOWED_RECIPIENTS: ${DIGEST_ALLOWED_RECIPIENTS:?Set DIGEST_ALLOWED_RECIPIENTS in .env to enable mail delivery}
       DIGEST_DATABASE: /data/digest.sqlite
       DIGEST_TLS_CERT_FILE: /run/digest-tls/mail.bond-sdc.com.crt
       DIGEST_TLS_KEY_FILE: /run/digest-tls/mail.bond-sdc.com.key
