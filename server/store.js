@@ -1,10 +1,9 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 const hours = 60 * 60 * 1000;
-const validity = 2 * hours;
 const retention = 24 * hours;
-const randomHex = (bytes) => randomBytes(bytes).toString("hex");
+const automaticRetention = 7 * retention;
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
 export function openStore(path) {
@@ -29,12 +28,16 @@ export function openStore(path) {
     CREATE INDEX IF NOT EXISTS jobs_state ON jobs (state, available_at, created_at);
   `);
 
-  const usable = db.prepare("SELECT title_code FROM jobs WHERE id = ? AND state = 'waiting' AND expires_at > ?");
+  // Retain the original column layout so pending jobs and the existing database survive upgrades.
   const accept = db.prepare(`
-    UPDATE jobs SET state = 'queued', raw = ?, available_at = ?
-    WHERE id = ? AND state = 'waiting' AND expires_at > ?
-      AND (SELECT count(*) FROM jobs WHERE state IN ('queued', 'processing', 'sending')) < 15
+    INSERT INTO jobs (id, status_key_hash, title_code, recipient, subject, created_at, expires_at, state, available_at, raw)
+    SELECT ?, '', '', ?, ?, ?, ?, 'queued', ?, ?
+    WHERE (SELECT count(*) FROM jobs WHERE state IN ('queued', 'processing', 'sending')) < 15
+      AND (SELECT count(*) FROM jobs WHERE created_at > ?) < 60
+      AND (SELECT count(*) FROM jobs WHERE recipient = ? AND created_at > ?) < 8
+    ON CONFLICT(id) DO NOTHING
   `);
+  const find = db.prepare("SELECT id FROM jobs WHERE id = ?");
   const claim = db.prepare(`
     UPDATE jobs SET state = 'processing'
     WHERE id = (SELECT id FROM jobs WHERE state = 'queued' AND available_at <= ? ORDER BY created_at, id LIMIT 1)
@@ -48,32 +51,12 @@ export function openStore(path) {
         UPDATE jobs SET state = 'uncertain', reason = 'interrupted', raw = NULL WHERE state = 'sending';
       `);
     },
-    create({ recipient, subject }, now = Date.now()) {
-      const id = randomHex(16);
-      const statusKey = randomHex(24);
-      const titleCode = "DB-" + randomHex(6).toUpperCase();
-      const expiresAt = now + validity;
-      const result = db.prepare(`
-        INSERT INTO jobs (id, status_key_hash, title_code, recipient, subject, created_at, expires_at)
-        SELECT ?, ?, ?, ?, ?, ?, ?
-        WHERE (SELECT count(*) FROM jobs WHERE created_at > ?) < 60
-          AND (SELECT count(*) FROM jobs WHERE recipient = ? AND created_at > ?) < 8
-      `).run(id, hash(statusKey), titleCode, recipient, subject, now, expiresAt, now - hours, recipient, now - hours);
-      return result.changes ? { id, statusKey } : null;
-    },
-    status(id, statusKey, now = Date.now()) {
-      const job = db.prepare(`
-        SELECT id, title_code AS titleCode, recipient, subject, expires_at AS expiresAt, state, reason
-        FROM jobs WHERE id = ? AND status_key_hash = ?
-      `).get(id, hash(statusKey));
-      if (job?.state === "waiting" && job.expiresAt <= now) job.state = "expired";
-      return job;
-    },
-    incoming(id, now = Date.now()) {
-      return usable.get(id, now);
-    },
-    enqueue(id, raw, now = Date.now()) {
-      return Boolean(accept.run(raw, now, id, now).changes);
+    enqueueIncoming({ recipient, messageId, subject, raw }, now = Date.now()) {
+      const id = hash(recipient + "\0" + messageId);
+      const expiresAt = now + automaticRetention - retention;
+      const result = accept.run(id, recipient, subject, now, expiresAt, now, raw, now - hours, recipient, now - hours);
+      if (result.changes) return "queued";
+      return find.get(id) ? "duplicate" : "busy";
     },
     claim(now = Date.now()) {
       return claim.get(now);

@@ -9,7 +9,7 @@ if (config.emailDeliveryEnabled) {
   const { prepareEmailDelivery } = await import("./email-automation.js");
   delivery = prepareEmailDelivery(config, () => shutdown(1));
 }
-const web = createWebServer(config, delivery?.store);
+const web = createWebServer(config);
 
 async function shutdown(exitCode = 0) {
   if (finishing) return;

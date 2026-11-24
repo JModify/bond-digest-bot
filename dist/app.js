@@ -11,10 +11,14 @@ const fileError = byId("file-error");
 const preview = byId("preview");
 const previewFrame = byId("email-preview");
 const download = byId("download");
+const groupAddress = byId("group-address");
+const copyAddress = byId("copy-address");
+const automaticFeedback = byId("automatic-feedback");
 const emailType = "message/rfc822";
 
 let requestId = 0;
 let logoRequest;
+let addressRequest;
 
 function showError(message = "") {
   fileError.hidden = !message;
@@ -138,3 +142,52 @@ for (const type of ["dragover", "drop"]) {
     if (event.dataTransfer.types.includes("Files")) event.preventDefault();
   });
 }
+
+async function loadGroupAddress() {
+  if (groupAddress.value || addressRequest) return;
+  automaticFeedback.textContent = "Loading the group address…";
+  addressRequest = fetch(new URL("api/email", import.meta.url), { cache: "no-store" });
+  try {
+    const response = await addressRequest;
+    if (response.status === 404) {
+      automaticFeedback.textContent = "Automatic delivery is not configured.";
+      return;
+    }
+    if (!response.ok) throw new Error("Unable to load the group address");
+    const { groupAddress: address } = await response.json();
+    if (!address) throw new Error("Missing group address");
+    groupAddress.value = address;
+    automaticFeedback.hidden = true;
+    byId("automatic-address").hidden = false;
+  } catch {
+    automaticFeedback.textContent = "The group address couldn’t be loaded. Open Automatic again to retry.";
+  } finally {
+    addressRequest = undefined;
+  }
+}
+
+function showWorkflow() {
+  const automatic = location.hash === "#automatic";
+  byId("manual-view").hidden = automatic;
+  byId("automatic-view").hidden = !automatic;
+  byId("privacy-note").hidden = automatic;
+  for (const link of document.querySelectorAll("[data-workflow]")) {
+    if (link.dataset.workflow === (automatic ? "automatic" : "manual")) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+  if (automatic) loadGroupAddress();
+}
+
+copyAddress.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(groupAddress.value);
+    copyAddress.textContent = "Copied";
+    byId("copy-feedback").textContent = "Group address copied.";
+  } catch {
+    groupAddress.focus();
+    groupAddress.select();
+    byId("copy-feedback").textContent = "Group address selected.";
+  }
+});
+window.addEventListener("hashchange", showWorkflow);
+showWorkflow();

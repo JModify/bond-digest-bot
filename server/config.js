@@ -24,6 +24,9 @@ export function loadConfig(env = process.env) {
   const webConfig = { origin: origin.origin, emailDeliveryEnabled };
   if (!emailDeliveryEnabled) return webConfig;
 
+  const groupAddress = normaliseAddress(env.DIGEST_GROUP_ADDRESS).toLowerCase();
+  if (!groupAddress) throw new Error("Set DIGEST_GROUP_ADDRESS to the Microsoft 365 group email address.");
+  const inboxDomain = hostname(env.DIGEST_INBOX_DOMAIN ?? "inbox.bond-sdc.com", "DIGEST_INBOX_DOMAIN");
   const allowedRecipients = list(env.DIGEST_ALLOWED_RECIPIENTS);
   const recipientDomains = list(env.DIGEST_ALLOWED_RECIPIENT_DOMAINS);
   if (!allowedRecipients.length && !recipientDomains.length) {
@@ -41,7 +44,8 @@ export function loadConfig(env = process.env) {
   const tlsDir = env.DIGEST_TLS_DIR ?? "./var/smtp-tls";
   return {
     ...webConfig,
-    inboxDomain: hostname(env.DIGEST_INBOX_DOMAIN ?? "inbox.bond-sdc.com", "DIGEST_INBOX_DOMAIN"),
+    groupAddress,
+    inboxAddress: "digest@" + inboxDomain,
     mailHost: hostname(env.DIGEST_MAIL_HOST ?? "mail.bond-sdc.com", "DIGEST_MAIL_HOST"),
     from,
     allowedRecipients,

@@ -7,7 +7,7 @@ Use one Ubuntu server in **Asia Pacific (Sydney)** (`ap-southeast-2`). Docker Co
 | `service-desk-central` | Caddy serves the static site, manages HTTPS and proxies the password-protected Digest Bot site. | `https://bond-sdc.com` and `https://www.bond-sdc.com` |
 | `digest-bot` | Node.js serves the formatter. Visitors format and download `.eml` files in their own browser. | `https://digest.bond-sdc.com` |
 
-The default deployment uses ports `80` and `443` for web traffic. [SMTP, the mail certificate, the SQLite queue and SES delivery](email-delivery.md) are available through a separate Compose configuration for future use.
+The default deployment uses ports `80` and `443` for web traffic. [Enable automatic digests on EC2](email-delivery.md) to add the fixed SMTP inbox, the Microsoft 365 group and SES replies.
 
 ## 1. Launch the EC2 server
 
@@ -94,7 +94,7 @@ Open [Service Desk Central](https://bond-sdc.com/) and [Digest Bot](https://dige
 
 ## Update both sites
 
-Use the directory where you already cloned the apps. If you originally cloned the `docker-ec2` branches, switch both repositories to `main` before pulling.
+These commands update the manual deployment. If you use automatic delivery, follow the [v1.1.0 upgrade steps](email-delivery.md#2-update-the-digest-bot-checkout-and-env) and start with both Compose files. If you originally cloned the `docker-ec2` branches, switch both repositories to `main` before pulling.
 
 ```bash
 cd ~/bond-sdc/bond-digest-bot

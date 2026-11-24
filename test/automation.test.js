@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { once } from "node:events";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import net from "node:net";
-import { JSDOM } from "jsdom";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { JSDOM } from "jsdom";
+import { dkimSign } from "mailauth/lib/dkim/sign";
 import { formatDigest, readDigest } from "../dist/core/digest.js";
 import { parseEmail } from "../dist/core/mime.js";
 import { DEFAULT_PRESET } from "../dist/core/preset.js";
@@ -17,41 +20,35 @@ import { createWebServer } from "../server/http.js";
 import { createSmtpServer } from "../server/smtp.js";
 import { openStore } from "../server/store.js";
 
-const config = {
-  emailDeliveryEnabled: true,
-  origin: "https://digest.bond-sdc.com",
-  inboxDomain: "inbox.bond-sdc.com",
-  mailHost: "mail.bond-sdc.com",
-  from: "digest@bond-sdc.com",
-  allowedRecipients: ["staff@example.org"],
-  recipientDomains: [],
-  sharepointHosts: ["bonduni.sharepoint.com"],
-  maxMessageBytes: 1024 * 1024,
-};
-
-const sourceDigest = `From: Staff Member <someone@example.net>\r
-Subject: SharePoint digest TITLE_CODE\r
-Content-Type: text/html; charset=UTF-8\r
-\r
-<html><body><table><tr><td>
+const config = loadConfig({
+  DIGEST_EMAIL_DELIVERY_ENABLED: "true",
+  DIGEST_GROUP_ADDRESS: "staff-news@example.org",
+  DIGEST_ALLOWED_RECIPIENTS: "staff@example.org",
+});
+const sender = "staff@example.org";
+const sourceDigest = `From: Staff Member <${sender}>\r\nReply-To: another@example.net\r\nTo: ${config.groupAddress}\r\nMessage-ID: <news-1@example.org>\r\nSubject: SharePoint digest\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<html><body><table><tr><td>
 <a href="https://bonduni.sharepoint.com/sites/News/SitePages/Example.aspx">Test story</a>
 <p>Sample summary.</p><div class="author">Example Author</div><div>19/11/2026</div>
-</td></tr></table></body></html>\r
-`;
-const article = {
-  title: "Test story",
-  href: "https://bonduni.sharepoint.com/sites/News/SitePages/Example.aspx",
-  summary: "Sample summary.",
+</td></tr></table></body></html>\r\n`.replace(/\r?\n/g, "\r\n");
+const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+  modulusLength: 2048,
+  privateKeyEncoding: { type: "pkcs8", format: "pem" },
+  publicKeyEncoding: { type: "spki", format: "der" },
+});
+const keyRecord = "v=DKIM1; k=rsa; p=" + publicKey.toString("base64");
+const resolveKey = async (name) => {
+  if (name === "test._domainkey.example.org") return [[keyRecord]];
+  throw Object.assign(new Error("No DKIM key"), { code: name.startsWith("timeout.") ? "ETIMEOUT" : "ENODATA" });
 };
 
-async function statusEventually(url, key, states) {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const response = await fetch(url, { headers: { "X-Digest-Status": key } });
-    const job = await response.json();
-    if (states.includes(job.state)) return job;
-    await delay(50);
-  }
-  throw new Error("The expected job state was not reached");
+async function sign(raw, { headerList, selector = "test" } = {}) {
+  const { signatures, errors } = await dkimSign(Buffer.from(raw, "latin1"), {
+    signatureData: [{ signingDomain: "example.org", selector, privateKey }],
+    headerList,
+  });
+  assert.deepEqual(errors, []);
+  assert.match(signatures, /^DKIM-Signature:/i);
+  return signatures + raw;
 }
 
 async function smtpClient(port) {
@@ -69,129 +66,119 @@ async function smtpClient(port) {
     socket.write(line + "\r\n");
     return response();
   }
-  async function body(raw) {
-    return command(raw.replace(/(^|\r\n)\./g, "$1..").replace(/\r\n$/, "") + "\r\n.");
-  }
   assert.match(await response(), /^220 /);
   assert.match(await command("EHLO example.net"), /^250 /);
-  return { command, body, close: () => socket.destroy() };
+  return {
+    command,
+    async send(raw) {
+      // Microsoft 365 can rewrite the envelope while leaving the signed From intact.
+      assert.match(await command("MAIL FROM:<forward+SRS=example.org=staff@relay.example.net>"), /^250 /);
+      assert.match(await command(`RCPT TO:<${config.inboxAddress}>`), /^250 /);
+      assert.match(await command("DATA"), /^354 /);
+      const data = Buffer.from(raw.replace(/(^|\r\n)\./g, "$1..").replace(/\r\n$/, "") + "\r\n.\r\n", "latin1");
+      socket.write(data);
+      return response();
+    },
+    close: () => socket.destroy(),
+  };
 }
 
-function mailSource(title, sample, privateSample) {
-  const input = privateSample ? readFileSync(privateSample).toString("latin1") : sample;
-  const text = input.replace(/^Subject:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*/mi, "Subject: Staff shared \"" + title + "\" with you");
-  return text.replace(/\r?\n/g, "\r\n");
-}
-
-test("creates a private request, accepts matching SMTP mail and delivers the saved digest once", async (t) => {
+function exampleDigest() {
   const privateSample = process.env.DIGEST_TEST_EML;
+  if (!privateSample) return sourceDigest;
+  return readFileSync(privateSample).toString("latin1").replace(/\r?\n/g, "\r\n")
+    .replace(/^From:[^\r\n]*(?:\r\n[ \t][^\r\n]*)*/mi, `From: Staff Member <${sender}>`);
+}
+
+test("accepts a digest at the fixed inbox and returns one formatted reply to the signed From", async (t) => {
   const store = openStore(":memory:");
   const accepted = [];
-  const smtp = createSmtpServer(config, store);
+  const smtp = createSmtpServer(config, store, undefined, resolveKey);
   smtp.listen(0, "127.0.0.1");
   await once(smtp.server, "listening");
-  const web = createWebServer(config, store).listen(0, "127.0.0.1");
-  await once(web, "listening");
   const stop = startDeliveryWorker(config, store, { async send(message) { accepted.push(message); } });
   const client = await smtpClient(smtp.server.address().port);
   t.after(async () => {
     client.close();
     await stop();
-    await Promise.all([new Promise((resolve) => smtp.close(resolve)), new Promise((resolve) => web.close(resolve))]);
+    await new Promise((resolve) => smtp.close(resolve));
     store.close();
   });
 
-  const base = "http://127.0.0.1:" + web.address().port;
-  assert.match(await (await fetch(base)).text(), /v1\.0\.4/);
-  assert.equal((await (await fetch(base + "/api/email")).json()).from, config.from);
-  const create = (payload, origin = config.origin) => fetch(base + "/api/email/requests", {
-    method: "POST",
-    headers: { Origin: origin, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  assert.equal((await create({ recipient: "staff@example.org" }, "https://untrusted.example")).status, 403);
-  assert.equal((await create({ recipient: "unlisted@example.org" })).status, 400);
-  assert.equal(smtp.options.disabledCommands.includes("AUTH"), true);
   assert.match(await client.command("MAIL FROM:<>"), /^550 /);
-  assert.match(await client.command("MAIL FROM:<external@example.net>"), /^250 /);
-  assert.match(await client.command("RCPT TO:<staff@example.org>"), /^550 /);
-
-  const created = await create({ recipient: "Staff@example.org", subject: "Saved Bond preset", from: "ignored@example.net" });
-  assert.equal(created.status, 201);
-  const job = await created.json();
-  assert.equal(job.recipient, "staff@example.org");
-  assert.equal(job.from, config.from);
-  const statusUrl = base + "/api/email/requests/" + job.id;
-  assert.equal((await fetch(statusUrl)).status, 404);
-  assert.equal((await fetch(statusUrl, { headers: { "X-Digest-Status": "0".repeat(48) } })).status, 404);
-
-  assert.match(await client.command("RCPT TO:<" + job.inbox + ">"), /^250 /);
-  assert.match(await client.command("DATA"), /^354 /);
-  assert.match(await client.body(mailSource("WRONG-CODE", sourceDigest)), /^550 /);
-  assert.equal((await statusEventually(statusUrl, job.statusKey, ["waiting"])).state, "waiting");
-
-  assert.match(await client.command("MAIL FROM:<external@example.net>"), /^250 /);
-  assert.match(await client.command("RCPT TO:<" + job.inbox + ">"), /^250 /);
-  assert.match(await client.command("DATA"), /^354 /);
-  assert.match(await client.body(mailSource(job.titleCode, sourceDigest, privateSample)), /^250 /);
-  assert.match(await client.command("MAIL FROM:<external@example.net>"), /^250 /);
-  assert.match(await client.command("RCPT TO:<" + job.inbox + ">"), /^550 /);
-
-  const result = await statusEventually(statusUrl, job.statusKey, ["sent", "failed", "uncertain"]);
-  assert.equal(result.state, "sent", result.reason);
+  assert.match(await client.command("MAIL FROM:<relay@example.net>"), /^250 /);
+  assert.match(await client.command(`RCPT TO:<digest-${"0".repeat(32)}@inbox.bond-sdc.com>`), /^550 /);
+  assert.match(await client.command("RSET"), /^250 /);
+  const raw = await sign(exampleDigest());
+  assert.match(await client.send(raw), /^250 Digest queued/);
+  for (let attempt = 0; attempt < 50 && !accepted.length; attempt += 1) await delay(50);
+  assert.match(await client.send("Received: by retry.example.net\r\n" + raw), /^250 Digest already received/);
+  assert.equal(store.claim(), undefined);
   assert.equal(accepted.length, 1);
   const message = accepted[0];
-  assert.equal(message.recipient, job.recipient);
+  assert.equal(message.recipient, sender);
   const rendered = parseEmail(message.raw);
   assert.equal(rendered.from, config.from);
-  assert.equal(rendered.subject, "Saved Bond preset");
-  if (!privateSample) assert.match(rendered.html, /Test story/);
-  assert.match(rendered.html, /Staff News/);
+  assert.match(rendered.subject, /^Bond Staff News \| /);
+  if (!process.env.DIGEST_TEST_EML) assert.match(rendered.html, /Test story/);
   assert.match(rendered.html, /View all news and upcoming events/);
-  assert.equal(rendered.images.size, privateSample ? 3 : 1);
+  assert.equal(rendered.images.size, process.env.DIGEST_TEST_EML ? 3 : 1);
   assert.match(message.raw.toString(), /\r\nAuto-Submitted: auto-replied\r\n/);
-  assert.doesNotMatch(message.raw.toString(), /\r\nX-Unsent:/);
+});
+
+test("rejects unauthenticated, mismatched or altered From fields before creating a job", async (t) => {
+  const store = openStore(":memory:");
+  const smtp = createSmtpServer(config, store, undefined, resolveKey);
+  smtp.listen(0, "127.0.0.1");
+  await once(smtp.server, "listening");
+  const client = await smtpClient(smtp.server.address().port);
+  t.after(async () => {
+    client.close();
+    await new Promise((resolve) => smtp.close(resolve));
+    store.close();
+  });
+
+  assert.match(await client.send("Authentication-Results: example.org; dkim=pass\r\n" + sourceDigest), /^550 .*DKIM/);
+  assert.match(await client.send(await sign(sourceDigest.replace(sender, "other@example.org"))), /^550 .*not approved/);
+  const signed = await sign(sourceDigest);
+  assert.match(await client.send("From: Staff Member <staff@example.org>\r\n" + signed), /^550 /);
+  assert.match(await client.send(signed.replace("Sample summary.", "Edited summary.")), /^550 .*DKIM/);
+  const unsignedMessageId = await sign(sourceDigest, { headerList: ["from", "subject", "content-type"] });
+  assert.match(await client.send(unsignedMessageId), /^550 .*DKIM/);
+  assert.match(await client.send(await sign(sourceDigest, { selector: "timeout" })), /^451 .*DKIM/);
+  assert.equal(store.claim(), undefined);
 });
 
 test("recovers queued mail after restart and avoids repeating an unconfirmed send", () => {
   const dir = mkdtempSync(join(tmpdir(), "digest-bot-test-"));
   const database = join(dir, "queue.sqlite");
+  const incoming = { recipient: sender, subject: DEFAULT_PRESET.subject, messageId: "<one@example.org>", raw: Buffer.from("first") };
   try {
     const before = openStore(database);
-    const sending = before.create({ recipient: "staff@example.org", subject: "first" }, 1);
-    const processing = before.create({ recipient: "staff@example.org", subject: "second" }, 2);
-    before.enqueue(sending.id, Buffer.from("first message"), 1);
-    before.enqueue(processing.id, Buffer.from("second message"), 2);
-    before.claim(2);
-    before.sending(sending.id);
-    before.claim(2);
+    assert.equal(before.enqueueIncoming(incoming, 1), "queued");
+    assert.equal(before.enqueueIncoming({ ...incoming, messageId: "<two@example.org>", raw: Buffer.from("second") }, 2), "queued");
+    const first = before.claim(3);
+    before.sending(first.id);
+    before.claim(3);
     before.close();
 
     const after = openStore(database);
+    const reader = new DatabaseSync(database, { readOnly: true });
     try {
       after.recover();
-      assert.equal(after.status(sending.id, sending.statusKey, 10).state, "uncertain");
-      assert.equal(after.status(processing.id, processing.statusKey, 10).state, "queued");
-      assert.equal(Buffer.from(after.claim(10).raw).toString(), "second message");
+      const previous = reader.prepare("SELECT state, raw FROM jobs WHERE id = ?").get(first.id);
+      assert.equal(previous.state, "uncertain");
+      assert.equal(previous.raw, null);
+      assert.equal(Buffer.from(after.claim(10).raw).toString(), "second");
       assert.equal(after.claim(10), undefined);
+      assert.equal(after.enqueueIncoming(incoming, 10), "duplicate");
     } finally {
+      reader.close();
       after.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test("manual export still supports viewing and editable drafts", () => {
-  const digest = { articles: [article], suggestedRecipient: "manual@example.org" };
-  const preset = { from: "bondstaffnews@bond.edu.au", subject: "Manual digest" };
-  const date = new Date("2026-11-20T01:15:00Z");
-  const view = formatDigest(digest, preset, date);
-  const draft = formatDigest(digest, preset, date, undefined, { editable: true });
-  assert.match(view, /\r\nFrom: bondstaffnews@bond\.edu\.au\r\nTo: manual@example\.org\r\n/);
-  assert.match(draft, /\r\nX-Unsent: 1\r\n/);
-  assert.doesNotMatch(view, /\r\nX-Unsent:|\r\nAuto-Submitted:/);
-  assert.match(parseEmail(Buffer.from(draft)).html, /Test story/);
 });
 
 test("manual export uses the Staff News sender and leaves the recipient blank", () => {
@@ -209,25 +196,22 @@ test("manual export uses the Staff News sender and leaves the recipient blank", 
   }
 });
 
-test("default deployment serves the formatter with email delivery inaccessible", async (t) => {
-  const config = loadConfig({});
-  assert.equal(config.emailDeliveryEnabled, false);
-  const web = createWebServer(config).listen(0, "127.0.0.1");
-  await once(web, "listening");
-  t.after(() => new Promise((resolve) => web.close(resolve)));
+test("the website exposes only the group address when automatic mode is configured", async (t) => {
+  for (const current of [loadConfig({}), config]) {
+    const web = createWebServer(current).listen(0, "127.0.0.1");
+    await once(web, "listening");
+    t.after(() => new Promise((resolve) => web.close(resolve)));
 
-  const base = "http://127.0.0.1:" + web.address().port;
-  const page = await (await fetch(base + "/#email")).text();
-  assert.match(page, /Drop your \.eml file here/);
-  assert.doesNotMatch(page, /Email delivery|delivery-form|editor-form|data-tab/);
-  assert.equal((await fetch(base + "/healthz")).status, 200);
-  assert.equal((await fetch(base + "/email-delivery.js")).status, 404);
-  assert.equal((await fetch(base + "/api/email")).status, 404);
-  assert.equal((await fetch(base + "/api/email/requests/" + "0".repeat(32))).status, 404);
-  const start = await fetch(base + "/api/email/requests", {
-    method: "POST",
-    headers: { Origin: config.origin, "Content-Type": "application/json" },
-    body: JSON.stringify({ recipient: "staff@example.org" }),
-  });
-  assert.equal(start.status, 404);
+    const base = "http://127.0.0.1:" + web.address().port;
+    const page = await (await fetch(base)).text();
+    assert.match(page, /Drop your \.eml file here/);
+    assert.match(page, /v1\.1\.0/);
+    assert.doesNotMatch(page, /delivery-form|editor-form|Return email address/);
+    assert.equal((await fetch(base + "/healthz")).status, 200);
+    const settings = await fetch(base + "/api/email");
+    if (current.emailDeliveryEnabled) assert.deepEqual(await settings.json(), { groupAddress: config.groupAddress });
+    else assert.equal(settings.status, 404);
+    assert.equal((await fetch(base + "/api/email/requests/" + "0".repeat(32))).status, 404);
+    assert.equal((await fetch(base + "/api/email/requests", { method: "POST" })).status, 404);
+  }
 });

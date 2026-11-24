@@ -47,9 +47,10 @@ export function startDeliveryWorker(config, store, transport, log = console) {
 
     let raw;
     try {
-      const digest = readDigest(job.raw, browser.window.document);
+      const digest = readDigest(job.raw, browser.window.document, { inferRecipient: false });
       if (!digest.articles.every((article) => hostedBy(article.href, sharepointHosts))) {
         store.finish(job.id, "failed", "source_host");
+        log.warn("Digest contained a news link outside the configured SharePoint site");
         return;
       }
       if (digest.siteUrl && !hostedBy(digest.siteUrl, sharepointHosts)) digest.siteUrl = "";
@@ -61,6 +62,7 @@ export function startDeliveryWorker(config, store, transport, log = console) {
         new Date(), logo, { automatic: true }));
     } catch {
       store.finish(job.id, "failed", "format");
+      log.warn("Authenticated email did not contain a readable SharePoint digest");
       return;
     }
 
@@ -80,6 +82,7 @@ export function startDeliveryWorker(config, store, transport, log = console) {
       return;
     }
     store.finish(job.id, "sent");
+    log.info("Formatted digest accepted by SES");
   }
 
   async function tick() {

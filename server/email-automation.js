@@ -40,7 +40,6 @@ export function prepareEmailDelivery(config, onError) {
   });
 
   return {
-    store,
     start(onListening) {
       smtp.listen(2525, "0.0.0.0", () => {
         stopWorker = startDeliveryWorker(config, store, transport);

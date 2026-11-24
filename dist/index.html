@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Format a SharePoint news digest and download it for Outlook.">
+  <meta name="description" content="Format a SharePoint news digest for Outlook by file or email.">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="theme-color" content="#f4f7fc">
   <title>Digest Bot · Service Desk Central</title>
@@ -19,60 +19,86 @@
         <img src="mark.png" width="42" height="42" alt="">
         <div><strong>Digest Bot</strong><span>Service Desk Central</span></div>
       </div>
-      <span class="privacy-note"><i class="icon icon-lock" aria-hidden="true"></i> Processed in your browser</span>
+      <nav class="workflow-nav" aria-label="Digest workflow">
+        <a href="#manual" data-workflow="manual" aria-current="page">Manual</a>
+        <a href="#automatic" data-workflow="automatic">Automatic</a>
+      </nav>
+      <span class="privacy-note" id="privacy-note"><i class="icon icon-lock" aria-hidden="true"></i> Processed in your browser</span>
     </div>
   </header>
 
   <main class="workspace-shell" id="main" tabindex="-1">
-    <div class="intro">
-      <h1>Format a news digest</h1>
-      <p>In SharePoint, email a news digest to your Bond inbox. Then add the saved email here.</p>
+    <div id="manual-view">
+      <div class="intro">
+        <h1>Format a news digest</h1>
+        <p>In SharePoint, email a news digest to your Bond inbox. Then add the saved email here.</p>
+      </div>
+
+      <section class="workspace panel" aria-label="Format an email file">
+        <noscript><p class="error">Enable JavaScript to format an email in your browser.</p></noscript>
+        <input type="file" accept=".eml,message/rfc822" id="file-input" hidden>
+        <div class="drop-zone" id="drop-zone" aria-busy="false">
+          <span class="drop-icon" aria-hidden="true"><i id="drop-icon" class="icon icon-upload"></i></span>
+          <div class="drop-copy">
+            <h2 id="drop-title">Drop your .eml file here</h2>
+            <p id="file-meta" hidden></p>
+          </div>
+          <div class="file-actions">
+            <button class="button button-secondary" type="button" id="choose-file">
+              <i class="icon icon-folder" aria-hidden="true"></i><span id="choose-label">Choose file</span>
+            </button>
+            <button class="button button-quiet" type="button" id="remove-file" hidden>Remove</button>
+          </div>
+        </div>
+        <p class="feedback visually-hidden" id="file-status" role="status"></p>
+        <p class="error" id="file-error" role="alert" hidden></p>
+        <p class="outlook-help" id="save-help">
+          <i class="icon icon-info" aria-hidden="true"></i>
+          <span>In new Outlook, open the digest and choose <strong>More actions → Save as</strong> to get the <code>.eml</code> file.</span>
+        </p>
+
+        <section class="download-area" id="result" aria-labelledby="result-title" hidden>
+          <div>
+            <h2 id="result-title">Your formatted email is ready</h2>
+            <p>Open the downloaded file in Outlook and choose <strong>Forward</strong>.</p>
+          </div>
+          <a class="button button-primary" id="download" draggable="false">
+            <i class="icon icon-download" aria-hidden="true"></i> Download .eml
+          </a>
+        </section>
+      </section>
+
+      <details class="preview panel" id="preview" hidden>
+        <summary>Preview formatted email</summary>
+        <dl class="email-meta">
+          <div><dt>Subject</dt><dd id="preview-subject"></dd></div>
+          <div><dt>From</dt><dd id="preview-from"></dd></div>
+        </dl>
+        <iframe id="email-preview" sandbox="" title="Formatted email" referrerpolicy="no-referrer"></iframe>
+      </details>
     </div>
 
-    <section class="workspace panel" aria-label="Format an email file">
-      <noscript><p class="error">Enable JavaScript to format an email in your browser.</p></noscript>
-      <input type="file" accept=".eml,message/rfc822" id="file-input" hidden>
-      <div class="drop-zone" id="drop-zone" aria-busy="false">
-        <span class="drop-icon" aria-hidden="true"><i id="drop-icon" class="icon icon-upload"></i></span>
-        <div class="drop-copy">
-          <h2 id="drop-title">Drop your .eml file here</h2>
-          <p id="file-meta" hidden></p>
-        </div>
-        <div class="file-actions">
-          <button class="button button-secondary" type="button" id="choose-file">
-            <i class="icon icon-folder" aria-hidden="true"></i><span id="choose-label">Choose file</span>
-          </button>
-          <button class="button button-quiet" type="button" id="remove-file" hidden>Remove</button>
+    <section id="automatic-view" aria-labelledby="automatic-title" hidden>
+      <div class="intro">
+        <h1 id="automatic-title">Email a news digest</h1>
+        <p>In SharePoint, choose <strong>Email a news digest</strong> and paste the group address into <strong>To</strong>.</p>
+      </div>
+
+      <div class="panel workspace">
+        <p class="automatic-feedback" id="automatic-feedback" role="status">Loading the group address…</p>
+        <div id="automatic-address" hidden>
+          <label class="address-label" for="group-address">Microsoft 365 group address</label>
+          <div class="address-actions">
+            <input type="text" id="group-address" readonly spellcheck="false">
+            <button class="button button-primary" type="button" id="copy-address">Copy address</button>
+          </div>
+          <p class="automatic-note">Digest Bot sends the formatted email back to your Bond inbox.</p>
+          <p class="visually-hidden" id="copy-feedback" role="status"></p>
         </div>
       </div>
-      <p class="feedback visually-hidden" id="file-status" role="status"></p>
-      <p class="error" id="file-error" role="alert" hidden></p>
-      <p class="outlook-help" id="save-help">
-        <i class="icon icon-info" aria-hidden="true"></i>
-        <span>In new Outlook, open the digest and choose <strong>More actions → Save as</strong> to get the <code>.eml</code> file.</span>
-      </p>
-
-      <section class="download-area" id="result" aria-labelledby="result-title" hidden>
-        <div>
-          <h2 id="result-title">Your formatted email is ready</h2>
-          <p>Open the downloaded file in Outlook and choose <strong>Forward</strong>.</p>
-        </div>
-        <a class="button button-primary" id="download" draggable="false">
-          <i class="icon icon-download" aria-hidden="true"></i> Download .eml
-        </a>
-      </section>
     </section>
 
-    <details class="preview panel" id="preview" hidden>
-      <summary>Preview formatted email</summary>
-      <dl class="email-meta">
-        <div><dt>Subject</dt><dd id="preview-subject"></dd></div>
-        <div><dt>From</dt><dd id="preview-from"></dd></div>
-      </dl>
-      <iframe id="email-preview" sandbox="" title="Formatted email" referrerpolicy="no-referrer"></iframe>
-    </details>
-
-    <footer class="version" aria-label="Version">v1.0.4</footer>
+    <footer class="version" aria-label="Version">v1.1.0</footer>
   </main>
 </body>
 </html>
