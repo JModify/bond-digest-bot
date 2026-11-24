@@ -232,6 +232,7 @@ test("manual export uses the Staff News sender and leaves the recipient blank", 
 });
 
 test("the website exposes only the group address when automatic mode is configured", async (t) => {
+  const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   for (const current of [loadConfig({}), config]) {
     const web = createWebServer(current).listen(0, "127.0.0.1");
     await once(web, "listening");
@@ -240,8 +241,13 @@ test("the website exposes only the group address when automatic mode is configur
     const base = "http://127.0.0.1:" + web.address().port;
     const page = await (await fetch(base)).text();
     assert.match(page, /Drop your \.eml file here/);
-    assert.match(page, /v1\.1\.1/);
     assert.doesNotMatch(page, /delivery-form|editor-form|Return email address/);
+    const { window } = new JSDOM(page);
+    t.after(() => window.close());
+    const footer = window.document.querySelector("body > footer");
+    assert.match(footer.textContent, /Author: Joshua Lavagna-Slater/);
+    assert.equal(footer.querySelector(".version").textContent, `v${version}`);
+    assert.equal(window.document.querySelector("header .home-link").href, "https://bond-sdc.com/");
     assert.equal((await fetch(base + "/healthz")).status, 200);
     const settings = await fetch(base + "/api/email");
     if (current.emailDeliveryEnabled) assert.deepEqual(await settings.json(), { groupAddress: config.groupAddress });
