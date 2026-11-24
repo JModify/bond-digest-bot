@@ -1,4 +1,4 @@
-# Digest Bot v1.1.1
+# Digest Bot v1.1.2
 
 Digest Bot formats SharePoint news digests in the Bond Staff News layout with a Brisbane-date subject.
 

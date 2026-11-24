@@ -1,6 +1,6 @@
 # Enable automatic digests on your existing EC2 server
 
-Digest Bot v1.1.1 has public **Manual** and **Automatic** tabs. Automatic displays the Microsoft 365 group address. A user sends a SharePoint news digest to the group and receives the formatted version in their original inbox. The bot uses SQLite to track which messages it has processed.
+Digest Bot v1.1.2 has public **Manual** and **Automatic** tabs. Automatic displays the Microsoft 365 group address. A user sends a SharePoint news digest to the group and receives the formatted version in their original inbox. The bot uses SQLite to track which messages it has processed.
 
 | Address | Where to use it |
 | --- | --- |
