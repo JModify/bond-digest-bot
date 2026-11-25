@@ -1,6 +1,6 @@
 # Service Desk Central administration
 
-Open **Admin** on Service Desk Central to review Digest Bot mail, manage panel accounts and run maintenance. The owner starts as `jlavagna`. Add a **Viewer** to share the email history or an **Operator** to also grant resend access. The owner manages accounts and server controls.
+Open **Admin** on Service Desk Central to review Digest Bot mail, manage panel accounts and run maintenance. The owner starts as `jlavagna` and manages access from **Users** and **Roles**.
 
 ## Enable the panel on EC2
 
@@ -29,7 +29,7 @@ For a panel without host maintenance, skip the installer and use `-f compose.yam
 
 ## Read the email history
 
-Each entry links to a timeline. Use the status filter and page links to find earlier entries. Times appear in Brisbane time.
+Select an ID in **Email History** to open its timeline. **Subject** shows the subject of the formatted email once available. The incoming subject appears in the record details. Use the status filter and page links to find earlier entries. Times appear in Brisbane time.
 
 | Status | What happened |
 | --- | --- |
@@ -46,14 +46,20 @@ The history and archived formatted messages live in `var/data/digest.sqlite`. Qu
 
 Include `var/data/digest.sqlite` and the `bond-sdc_sdc-admin-data` Docker volume in your EC2 backup plan. Take a consistent SQLite or filesystem snapshot. The database contains staff email addresses and formatted email content, so restrict access to its copies and account for its disk growth.
 
+## Manage access
+
+**Viewer** starts with Email History and Digest Bot status. **Operator** also starts with resend access. In **Roles**, edit either role or add a new one by selecting its permissions. Assign roles in **Users**. Reassign their users before deleting a role.
+
+Owner has every permission. People with **Role management** can edit roles and grant permissions they already have. **User management** lets people manage accounts whose roles they can assign.
+
 ## Manage the sites
 
-- **Pause outgoing mail** lets the active send finish and holds remaining jobs. Incoming SMTP can still queue mail while space is available.
+- **Freeze** lets the active send finish and holds remaining jobs. Incoming SMTP can still queue mail while space is available. **Resume** starts processing the queue again.
 - **Pull latest and restart sites** fetches and fast-forwards both `main` checkouts, builds both images and waits for Compose startup checks. It stops if a checkout has tracked changes, uses a different remote or cannot fast-forward.
 - **Save .env** updates the certificate contact, digest group address and reboot instance ID. The host validates the resulting Compose configuration before replacing the file. **Rebuild current code** applies the saved values from your existing checkouts.
 - **Reload values from EC2** refreshes the three fields after an edit in the terminal.
 
-Check the result in **System** after the host completes a request. If a request fails, inspect `sudo journalctl -u bond-sdc-admin.service -n 60 --no-pager`. If the host updater itself changes in a later release, rerun its installer from the new checkout.
+Check **Admin Activity** under **System** for the latest 20 events. Site updates and rebuilds log the request and its final result, including failure details. For more detail on a failed request, inspect `sudo journalctl -u bond-sdc-admin.service -n 60 --no-pager`. If the host updater itself changes in a later release, rerun its installer from the new checkout.
 
 If the updater reports local changes, use `git status --short --untracked-files=no` in the named checkout. Review those changes and preserve any deployment settings before cleaning the checkout and retrying. The updater checks both repositories before advancing either checkout or rebuilding the services.
 

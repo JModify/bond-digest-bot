@@ -12,11 +12,11 @@ export function createHostActions(config) {
   async function updateStatus() {
     if (!requestPath) return { state: "disabled", detail: "Host updater is not configured." };
     try {
+      const exists = await access(requestPath, constants.F_OK).then(() => true, () => false);
       const result = JSON.parse(await readFile(statusPath, "utf8"));
       if (typeof result.state !== "string" || typeof result.detail !== "string") throw new Error("Invalid host status");
-      const exists = await access(requestPath, constants.F_OK).then(() => true, () => false);
       if (exists && result.state !== "running") return { state: "queued", detail: "Waiting for the host to start the request." };
-      if (!exists && result.state === "running") return { state: "unknown", detail: "The host did not record a final result." };
+      if (!exists && result.state === "running") return { ...result, state: "unknown", detail: "The host did not record a final result." };
       return result;
     } catch {
       return { state: "unavailable", detail: "Could not read the host updater status." };

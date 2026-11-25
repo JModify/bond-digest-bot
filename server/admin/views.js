@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { passwordHint } from "./accounts.js";
+import { adminPages, can, canManageRole, permissions } from "./permissions.js";
 
 const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => entities[character]);
@@ -11,7 +12,6 @@ function time(value) {
 const post = (path, fields, button, className = "") => `<form method="post" action="/admin/${path}" class="${className}">${fields}${button}</form>`;
 const submit = (text, className = "") => `<button type="submit" class="${className}">${text}</button>`;
 const hidden = (name, value) => `<input type="hidden" name="${name}" value="${esc(value)}">`;
-const roles = { owner: "Owner", operator: "Operator", viewer: "Viewer" };
 
 export const statuses = {
   queued: "Queued", processing: "Preparing", sending: "Sending to SES", sent: "Accepted by SES",
@@ -31,8 +31,7 @@ const displayed = (value) => value ? esc(value) : "—";
 
 function navigation(user, current) {
   if (!user) return "";
-  const links = [["mail", "Email history"], ["system", "System"], ["users", "Users"], ["account", "Account"]];
-  return `<nav aria-label="Administration">${links.filter(([key]) => user.role === "owner" || key !== "users")
+  return `<nav aria-label="Administration">${adminPages(user)
     .map(([key, label]) => `<a href="/admin/${key}"${current === key ? ' aria-current="page"' : ""}>${label}</a>`).join("")}</nav>`;
 }
 
@@ -46,13 +45,14 @@ export function page(title, content, { user, current, notice } = {}) {
   <title>${esc(title)} | Service Desk Central Admin</title>
   <link rel="icon" href="/service-desk-mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/admin/admin.css">
+  ${notice ? '<script src="/admin/notice.js" defer></script>' : ""}
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
     <div class="shell header-inner">
       <a class="brand" href="/"><img src="/service-desk-mark.svg" alt="" width="32" height="32">Service Desk Central</a>
-      ${user ? `<div class="identity"><span>${esc(user.username)} · ${roles[user.role]}</span>${post("logout", "", submit("Sign out", "secondary"))}</div>` : ""}
+      ${user ? `<div class="identity"><span>${esc(user.username)} · ${esc(user.role_name ?? "Owner")}</span>${post("logout", "", submit("Sign out", "secondary"))}</div>` : ""}
     </div>
     <div class="shell">${navigation(user, current)}</div>
   </header>
@@ -85,20 +85,20 @@ function table(headers, contents) {
 
 export function mailPage(user, history, state, notice) {
   const body = history ? mailTable(history, state) : "<p>Automatic email delivery is disabled. Start the mail-enabled Compose stack to access its history.</p>";
-  return page("Email history", `<h1>Digest Bot email history</h1><p class="lede">SMTP submissions and outgoing SES requests. Times are shown in Brisbane time.</p>${body}`, { user, current: "mail", notice });
+  return page("Email History", `<h1>Digest Bot Email History</h1><p class="lede">SMTP submissions and outgoing SES requests. Times are shown in Brisbane time.</p>${body}`, { user, current: "mail", notice });
 }
 
 function mailTable({ rows, page: current, pages, total }, state) {
   const options = Object.entries(statuses).map(([key, name]) => `<option value="${key}"${state === key ? " selected" : ""}>${name}</option>`).join("");
   const link = (number) => `/admin/mail?${esc(new URLSearchParams({ page: number, ...(state ? { state } : {}) }).toString())}`;
   const records = rows.map((row) => `<tr>
-    <td>${time(row.created_at)}</td><td><a href="/admin/mail/${row.id}">${displayed(row.subject || row.output_subject || `Record ${row.id}`)}</a>
-    <small>${kinds[row.kind]}</small></td><td>${displayed(row.source)}</td><td>${displayed(row.recipient)}</td><td>${badge(row.state)}</td>
+    <td><a class="record-id" href="/admin/mail/${row.public_id}">${row.public_id}</a></td><td>${time(row.created_at)}</td>
+    <td>${displayed(row.output_subject)}</td><td>${displayed(row.recipient)}</td><td>${badge(row.state)}</td>
   </tr>`).join("");
   return `<section class="panel">
     <form class="filter" method="get" action="/admin/mail"><label>Status<select name="state"><option value="">All statuses</option>${options}</select></label>${submit("Filter", "secondary")}</form>
-    ${records ? table(["Received or queued", "Subject", "Source", "Send to", "Status"], records) : "<p>No records match this view.</p>"}
-    <nav class="pagination" aria-label="Email history pages">
+    ${records ? table(["ID", "Queued", "Subject", "Send To", "Status"], records) : "<p>No records match this view.</p>"}
+    <nav class="pagination" aria-label="Email History pages">
       <span>${total} ${total === 1 ? "record" : "records"} · Page ${current} of ${pages}</span>
       <div>${current > 1 ? `<a href="${link(current - 1)}" rel="prev">Previous</a>` : ""}${current < pages ? `<a href="${link(current + 1)}" rel="next">Next</a>` : ""}</div>
     </nav>
@@ -107,41 +107,56 @@ function mailTable({ rows, page: current, pages, total }, state) {
 
 export function mailDetail(user, row, notice) {
   const labels = [
+    ["ID", row.public_id],
+    ["Incoming subject", row.kind === "incoming" ? row.subject : ""],
     ["Source", row.source ? row.source + (row.kind === "smtp_attempt" ? " (SMTP envelope)" : "") : ""],
-    ["Send to", row.recipient], ["Outgoing subject", row.output_subject], ["SES message ID", row.ses_message_id], ["Requested by", row.actor],
+    ["Send To", row.recipient], ["Outgoing subject", row.output_subject], ["SES message ID", row.ses_message_id], ["Requested by", row.actor],
   ];
   const events = row.events.map(({ at, event, detail }) => `<tr><td>${time(at)}</td><td>${esc(eventLabels[event] ?? event)}</td><td>${displayed(detail)}</td></tr>`).join("");
-  const resend = row.can_resend && user.role !== "viewer"
-    ? post(`mail/${row.id}/resend`, `${hidden("request", randomUUID())}<label>Recipient email<input type="email" name="recipient" autocomplete="off" maxlength="254" placeholder="${esc(row.recipient)}" required></label>`, submit("Send a copy"), "inline-form")
+  const resend = row.can_resend && can(user, "resend")
+    ? post(`mail/${row.public_id}/resend`, `${hidden("request", randomUUID())}<label>Recipient email<input type="email" name="recipient" autocomplete="off" maxlength="254" placeholder="${esc(row.recipient)}" required></label>`, submit("Send a copy"), "inline-form")
     : (row.can_resend ? "" : "<p>No formatted copy is available to resend.</p>");
-  return page("Email record", `<a class="back-link" href="/admin/mail">Email history</a><h1>${esc(row.subject || row.output_subject || `Email record ${row.id}`)}</h1>
+  return page("Email record", `<a class="back-link" href="/admin/mail">Email History</a><h1>${esc(row.output_subject || `Email record ${row.public_id}`)}</h1>
     <section class="panel"><div class="panel-heading"><h2>${kinds[row.kind]}</h2>${badge(row.state)}</div>
       <dl class="facts">${labels.filter(([, value]) => value).map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl>
-      ${row.original_id ? `<p><a href="/admin/mail/${row.original_id}">View original email record</a></p>` : ""}
+      ${row.original_public_id ? `<p><a href="/admin/mail/${row.original_public_id}">View original email record</a></p>` : ""}
       ${row.state === "sent" ? "<p>Amazon SES accepted the send request. Mailbox delivery is unverified.</p>" : ""}
       ${resend}
     </section>
     <section class="panel"><h2>Timeline</h2>${table(["Brisbane time", "Event", "Details"], events)}</section>`, { user, current: "mail", notice });
 }
 
-export function systemPage(user, { pending, paused, activity, update, settings, instanceId }, notice) {
+export function systemPage(user, { pending, paused, activity = [], update = { state: "disabled" }, settings, instanceId }, notice) {
   const runningUpdate = ["queued", "running"].includes(update.state);
   const updateAvailable = !runningUpdate && !["disabled", "unavailable"].includes(update.state);
-  const updateForm = updateAvailable ? `<div class="inline-form">${post("system/update", "", submit("Pull latest and restart sites"))}
-    ${post("system/restart", "", submit("Rebuild current code", "secondary"))}</div>` : "";
-  const activityRows = activity.map(({ at, actor, action, detail }) => `<tr><td>${time(at)}</td><td>${esc(actor)}</td><td>${esc(action)}</td><td>${esc(detail)}</td></tr>`).join("");
   return page("System", `<h1>System</h1>
-    <section class="panel"><h2>Digest Bot</h2>
-      ${pending === undefined ? "<p>Automatic email delivery is disabled.</p>" : `<p>Outgoing mail is ${paused ? "paused" : "active"}. ${pending} ${pending === 1 ? "email is" : "emails are"} queued or in progress.</p>
-        ${user.role === "owner" ? post("system/mail", hidden("pause", String(!paused)), submit(paused ? "Resume outgoing mail" : "Pause outgoing mail", "secondary")) : ""}`}
-    </section>
-    ${user.role === "owner" ? `<section class="panel"><h2>Site updates</h2><p>Pulls <code>main</code> from both repositories and rebuilds the two Compose services. Both rebuild actions briefly interrupt the sites.</p>
-        <p><strong>${esc(update.state.charAt(0).toUpperCase() + update.state.slice(1))}</strong> · ${esc(update.detail)}</p>
-        ${update.updatedAt ? `<p>Last update ${time(update.updatedAt)}</p>` : ""}${updateForm}
-      </section>
-      ${environmentSettings(settings, updateAvailable, pending !== undefined)}
-      ${rebootPanel(instanceId, settings?.SDC_ADMIN_EC2_INSTANCE_ID, runningUpdate, updateAvailable)}
-      <section class="panel"><h2>Recent admin activity</h2>${activityRows ? table(["Brisbane time", "User", "Action", "Details"], activityRows) : "<p>No admin activity yet.</p>"}</section>` : ""}`, { user, current: "system", notice });
+    ${can(user, "digest_status") || can(user, "freeze") ? digestPanel(user, pending, paused) : ""}
+    ${can(user, "site_updates") ? siteUpdatesPanel(update, updateAvailable) : ""}
+    ${can(user, "environment") ? environmentSettings(settings, updateAvailable, pending !== undefined) : ""}
+    ${can(user, "reboot") ? rebootPanel(instanceId, settings?.SDC_ADMIN_EC2_INSTANCE_ID, runningUpdate, can(user, "site_updates") && updateAvailable) : ""}
+    ${can(user, "activity") ? activityPanel(activity) : ""}`, { user, current: "system", notice });
+}
+
+function digestPanel(user, pending, paused) {
+  const state = pending === undefined ? "Disabled" : paused ? "Frozen" : "Listening";
+  const controls = pending !== undefined && can(user, "freeze")
+    ? post("system/mail", hidden("pause", String(!paused)), submit(paused ? "Resume" : "Freeze", "secondary")) : "";
+  return `<section class="panel"><h2>Digest Bot</h2>
+    <p><strong>State:</strong> ${state}<br><strong>Queued:</strong> ${pending ?? 0}</p>
+    ${controls}</section>`;
+}
+
+function siteUpdatesPanel(update, available) {
+  const controls = available ? `<div class="inline-form">${post("system/update", "", submit("Pull latest and restart sites"))}
+    ${post("system/restart", "", submit("Rebuild current code", "secondary"))}</div>` : "";
+  return `<section class="panel"><h2>Site updates</h2><p>Pulls <code>main</code> from both repositories and rebuilds the two Compose services. Both rebuild actions briefly interrupt the sites.</p>
+    <p><strong>${esc(update.state.charAt(0).toUpperCase() + update.state.slice(1))}</strong> · ${esc(update.detail)}</p>
+    ${update.updatedAt ? `<p>Last update ${time(update.updatedAt)}</p>` : ""}${controls}</section>`;
+}
+
+function activityPanel(activity) {
+  const rows = activity.map(({ at, actor, action, detail }) => `<tr><td>${time(at)}</td><td>${esc(actor)}</td><td>${esc(action)}</td><td>${esc(detail)}</td></tr>`).join("");
+  return `<section class="panel"><h2>Admin Activity</h2>${rows ? table(["Time", "User", "Action", "Details"], rows) : "<p>No admin activity yet.</p>"}</section>`;
 }
 
 function rebootPanel(instanceId, savedId, runningUpdate, updateAvailable) {
@@ -177,24 +192,54 @@ function environmentSettings(settings, available, automatic) {
   return `<section class="panel"><h2>Environment settings</h2><p>Save changes to the EC2 <code>.env</code> file, then rebuild the sites to apply them.</p>${editor}</section>`;
 }
 
-const roleSelect = (role) => `<label>Role<select name="role"><option value="viewer"${role === "viewer" ? " selected" : ""}>Viewer</option><option value="operator"${role === "operator" ? " selected" : ""}>Operator</option></select></label>`;
+const roleSelect = (roles, selected) => `<label>Role<select name="role" required>${roles.map(({ id, name }) =>
+  `<option value="${id}"${id === selected ? " selected" : ""}>${esc(name)}</option>`).join("")}</select></label>`;
 const passwordField = (name, label, required = true) => `<label>${label}<input type="password" name="${name}" maxlength="128" ${name === "current" ? 'autocomplete="current-password"' : 'minlength="14" autocomplete="new-password"'}${required ? " required" : ""}></label>`;
 const usernameField = (username = "") => `<label>Username<input name="username" value="${esc(username)}" maxlength="32" minlength="3" autocomplete="off" required></label>`;
 
-export function usersPage(user, users, notice) {
-  const list = users.map((account) => `<tr><td>${esc(account.username)}</td><td>${roles[account.role]}</td><td>${account.role === "owner" ? "" : `<a href="/admin/users/${account.id}">Edit<span class="sr-only"> ${esc(account.username)}</span></a>`}</td></tr>`).join("");
-  return page("Users", `<h1>Users</h1><p class="lede">Viewers can read the email log. Operators can also resend digests. The owner manages access and the server.</p>
+export function usersPage(user, users, roles, notice) {
+  const allowedRoles = new Set(roles.map(({ id }) => id));
+  const list = users.map((account) => `<tr><td>${esc(account.username)}</td><td>${esc(account.role_name)}</td>
+    <td>${allowedRoles.has(account.role) ? `<a href="/admin/users/${account.id}">Edit<span class="sr-only"> ${esc(account.username)}</span></a>` : ""}</td></tr>`).join("");
+  return page("Users", `<h1>Users</h1>
     <section class="panel"><h2>Accounts</h2>${table(["Username", "Role", "Actions"], list)}</section>
-    <section class="panel"><h2>Add a user</h2><p>${passwordHint} Share the password with the user privately.</p>
-      ${post("users", usernameField() + roleSelect() + passwordField("password", "Initial password"), submit("Add user"), "inline-form")}</section>`, { user, current: "users", notice });
+    <section class="panel"><h2>Add a user</h2>
+      ${roles.length ? `<p>${passwordHint} Share the password with the user privately.</p>
+        ${post("users", usernameField() + roleSelect(roles) + passwordField("password", "Initial password"), submit("Add user"), "inline-form")}`
+        : "<p>No roles are available to assign.</p>"}</section>`, { user, current: "users", notice });
 }
 
-export function editUserPage(user, account, notice) {
+const confirmDeletion = '<label><input type="checkbox" name="confirm" value="yes" required> Confirm deletion</label>';
+
+export function editUserPage(user, account, roles, notice) {
   return page("Edit user", `<a class="back-link" href="/admin/users">Users</a><h1>Edit ${esc(account.username)}</h1>
     <section class="panel"><p>${passwordHint} Leave the password field blank to keep the existing password.</p>
-      ${post(`users/${account.id}`, usernameField(account.username) + roleSelect(account.role) + passwordField("password", "New password", false), submit("Save changes"), "inline-form")}</section>
+      ${post(`users/${account.id}`, usernameField(account.username) + roleSelect(roles, account.role) + passwordField("password", "New password", false), submit("Save changes"), "inline-form")}</section>
     <section class="panel"><h2>Delete account</h2><p>Deleting the account immediately signs the user out.</p>
-      ${post(`users/${account.id}/delete`, '<label><input type="checkbox" name="confirm" value="yes" required> Confirm deletion</label>', submit("Delete user", "danger"), "inline-form")}</section>`, { user, current: "users", notice });
+      ${post(`users/${account.id}/delete`, confirmDeletion, submit("Delete user", "danger"), "fields stacked-form")}</section>`, { user, current: "users", notice });
+}
+
+function roleFields(user, role) {
+  const checks = Object.entries(permissions).map(([key, label]) =>
+    `<label><input type="checkbox" name="permission" value="${key}"${role?.permissions.includes(key) ? " checked" : ""}${can(user, key) ? "" : " disabled"}> ${label}</label>`).join("");
+  return `<label>Role name<input name="name" value="${esc(role?.name)}" maxlength="40" required></label>
+    <fieldset class="permissions"><legend>Permissions</legend><div>${checks}</div></fieldset>`;
+}
+
+export function rolesPage(user, roles, notice) {
+  const rows = roles.map((role) => `<tr><td>${esc(role.name)}</td><td>${role.user_count}</td>
+    <td>${canManageRole(user, role) ? `<a href="/admin/roles/${role.id}">Edit<span class="sr-only"> ${esc(role.name)}</span></a>` : ""}</td></tr>`).join("");
+  return page("Roles", `<h1>Roles</h1><p class="lede">Owner has every permission. Role managers can grant permissions they already have.</p>
+    <section class="panel">${table(["Role", "Users", "Actions"], rows)}</section>
+    <section class="panel"><h2>Add a role</h2>
+      ${post("roles", roleFields(user), submit("Add role"), "fields stacked-form")}</section>`, { user, current: "roles", notice });
+}
+
+export function editRolePage(user, role, notice) {
+  return page("Edit role", `<a class="back-link" href="/admin/roles">Roles</a><h1>Edit ${esc(role.name)}</h1>
+    <section class="panel">${post(`roles/${role.id}`, roleFields(user, role), submit("Save changes"), "fields stacked-form")}</section>
+    <section class="panel"><h2>Delete role</h2><p>Reassign any users with this role before deleting it.</p>
+      ${post(`roles/${role.id}/delete`, confirmDeletion, submit("Delete role", "danger"), "fields stacked-form")}</section>`, { user, current: "roles", notice });
 }
 
 export function accountPage(user, notice) {
