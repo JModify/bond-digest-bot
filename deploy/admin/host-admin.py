@@ -130,7 +130,8 @@ class Deployment:
 
     def git(self, path, *args, capture=False):
         command = ["runuser", "-u", self.user, "--", "git", "-C", str(path), "-c", "core.hooksPath=/dev/null", *args]
-        result = subprocess.run(command, check=True, capture_output=capture, text=True, timeout=75)
+        # Keep the service's private umask for settings, and use standard modes for checked-out source.
+        result = subprocess.run(command, check=True, capture_output=capture, text=True, timeout=75, umask=0o022)
         return result.stdout.strip() if capture else None
 
     def fetch_main(self, path):
