@@ -19,6 +19,10 @@ END = b"# END SERVICE DESK CENTRAL ADMIN SETTINGS\n"
 BLOCK = re.compile(rb"(?m)^" + re.escape(BEGIN) + b"".join(key.encode() + rb"='[^'\r\n]*'\n" for key in KEYS) + re.escape(END) + rb"\Z")
 
 
+class CheckoutError(ValueError):
+    """A checkout failure with a message safe to display in the admin panel."""
+
+
 def write_json(path, data):
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as out:
         staging = Path(out.name)
@@ -133,16 +137,21 @@ class Deployment:
         origin = self.git(path, "remote", "get-url", "origin", capture=True)
         expected = "https://github.com/JModify/" + path.name
         if origin not in {expected, expected + ".git"}:
-            raise ValueError(f"Unexpected origin for {path.name}")
+            raise CheckoutError(f"{path.name} uses an unexpected Git origin. Its origin must point to {expected}.")
         if self.git(path, "branch", "--show-current", capture=True) != "main":
-            raise ValueError(f"{path.name} must be on main")
+            raise CheckoutError(f"{path.name} must be on the main branch.")
         if self.git(path, "status", "--porcelain", "--untracked-files=no", capture=True):
-            raise ValueError(f"{path.name} has tracked local changes")
+            raise CheckoutError(f"{path.name} has local changes to tracked files. Run git status in that checkout on EC2.")
         self.git(path, "fetch", "--no-tags", "origin", "main")
         head = self.git(path, "rev-parse", "FETCH_HEAD", capture=True)
         if not re.fullmatch(r"[a-f0-9]{40}", head):
-            raise ValueError(f"Invalid fetched commit for {path.name}")
-        self.git(path, "merge-base", "--is-ancestor", "HEAD", head)
+            raise CheckoutError(f"Git did not return a valid commit for {path.name}.")
+        try:
+            self.git(path, "merge-base", "--is-ancestor", "HEAD", head)
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 1:
+                raise CheckoutError(f"{path.name} cannot fast-forward to the fetched main branch. Review its local commits on EC2.") from error
+            raise
         return head
 
     def rebuild(self, pull):
@@ -179,6 +188,10 @@ def apply_request(request_path, deployment):
             status("succeeded", "Environment settings reloaded from EC2.")
         else:
             raise ValueError("Unknown maintenance action")
+    except CheckoutError as error:
+        print(f"Maintenance request failed: {error}", file=sys.stderr)
+        status("failed", str(error))
+        return 1
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"Maintenance request failed: {type(error).__name__}", file=sys.stderr)
         status("failed", "The request failed. Check the bond-sdc-admin service log on EC2.")

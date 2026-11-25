@@ -55,6 +55,8 @@ Include `var/data/digest.sqlite` and the `bond-sdc_sdc-admin-data` Docker volume
 
 Check the result in **System** after the host completes a request. If a request fails, inspect `sudo journalctl -u bond-sdc-admin.service -n 60 --no-pager`. If the host updater itself changes in a later release, rerun its installer from the new checkout.
 
+If the updater reports local changes, use `git status --short --untracked-files=no` in the named checkout. Review those changes and preserve any deployment settings before cleaning the checkout and retrying. The updater checks both repositories before advancing either checkout or rebuilding the services.
+
 The panel submits fixed requests to a host `systemd` service. The container can write a request and read its result. The host holds the Docker access and only shares the three editable settings with the panel.
 
 ## Enable EC2 reboot
