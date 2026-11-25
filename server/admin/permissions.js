@@ -3,6 +3,7 @@ export const permissions = Object.freeze({
   resend: "Resend email",
   digest_status: "Digest Bot status",
   freeze: "Freeze and resume Digest Bot",
+  careers_schedule: "Manage Careers at Bond schedule",
   activity: "Admin Activity",
   site_updates: "Site updates",
   environment: "Environment settings",
@@ -17,7 +18,7 @@ export const defaultRoles = [
   ["operator", "Operator", ["email_history", "digest_status", "resend"]],
 ];
 
-const systemPermissions = ["digest_status", "freeze", "activity", "site_updates", "environment", "reboot"];
+const systemPermissions = ["digest_status", "freeze", "careers_schedule", "activity", "site_updates", "environment", "reboot"];
 
 export function can(user, permission) {
   return user.role === "owner" || Boolean(user.permissions?.includes(permission));

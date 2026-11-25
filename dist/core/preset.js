@@ -6,8 +6,9 @@ export const DEFAULT_PRESET = Object.freeze({
   recipient: "",
 });
 
+export const staffNewsTimeZone = "Australia/Brisbane";
 const brisbaneDate = new Intl.DateTimeFormat("en-AU", {
-  timeZone: "Australia/Brisbane",
+  timeZone: staffNewsTimeZone,
   weekday: "long",
   day: "numeric",
   month: "long",

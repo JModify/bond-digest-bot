@@ -34,5 +34,6 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => shutdown())
 function startWeb() {
   web.listen(8080, "0.0.0.0", () => console.log("Digest Bot is listening on HTTP 8080"));
 }
-if (delivery) delivery.start(startWeb, admin?.outgoingPaused);
-else startWeb();
+if (delivery) {
+  delivery.start(startWeb, { outgoingPaused: admin?.outgoingPaused, careersDay: admin?.careersDay });
+} else startWeb();

@@ -55,6 +55,7 @@ Owner has every permission. People with **Role management** can edit roles and g
 ## Manage the sites
 
 - **Freeze** lets the active send finish and holds remaining jobs. Incoming SMTP can still queue mail while space is available. **Resume** starts processing the queue again.
+- **Careers at Bond** appends the article to automatic Staff News emails formatted on the selected day in Brisbane time. Wednesday is the default. **Save schedule** takes effect for newly formatted digests and records the change in **Admin Activity**. Use **Manage Careers at Bond schedule** in **Roles** to grant access.
 - **Pull latest and restart sites** fetches and fast-forwards both `main` checkouts, builds both images and waits for Compose startup checks. It stops if a checkout has tracked changes, uses a different remote or cannot fast-forward.
 - **Save .env** updates the certificate contact, digest group address and reboot instance ID. The host validates the resulting Compose configuration before replacing the file. **Rebuild current code** applies the saved values from your existing checkouts.
 - **Reload values from EC2** refreshes the three fields after an edit in the terminal.

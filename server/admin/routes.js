@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { normaliseAddress } from "../../dist/core/mailbox.js";
+import { weekdays } from "../careers.js";
 import { checkPassword, hashPassword, openAccounts, sessionSeconds, validPassword, validUsername } from "./accounts.js";
 import { createHostActions } from "./host.js";
 import { adminPages, can, canManageRole, canViewSystem, permissions } from "./permissions.js";
@@ -23,6 +24,7 @@ const notices = {
   reboot: "AWS accepted the reboot request. Check the sites after the host starts again.",
   frozen: "Digest Bot frozen. The current send can finish and new mail will still queue.",
   resumed: "Digest Bot resumed.",
+  careers: "Careers at Bond schedule saved.",
   added: "User added.",
   edited: "User updated.",
   deleted: "User deleted.",
@@ -39,6 +41,7 @@ const hostActions = {
 };
 const systemPermissions = {
   "/admin/system/mail": "freeze",
+  "/admin/system/careers": "careers_schedule",
   "/admin/system/update": "site_updates",
   "/admin/system/restart": "site_updates",
   "/admin/system/settings": "environment",
@@ -326,6 +329,12 @@ export function createAdminPanel(config, store, host = createHostActions(config.
       accounts.pauseOutgoing(user.username, pause === "true");
       return redirect(res, `/admin/system?notice=${pause === "true" ? "frozen" : "resumed"}`);
     }
+    if (path === "/admin/system/careers") {
+      const day = form.get("weekday");
+      if (!weekdays.includes(day)) return errorPage(res, 400, "Choose a day of the week.", user);
+      accounts.setCareersDay(user.username, day);
+      return redirect(res, "/admin/system?notice=careers");
+    }
     if (startingHostAction) return errorPage(res, 409, "A host action is already starting.", user);
     startingHostAction = true;
     try {
@@ -352,6 +361,7 @@ export function createAdminPanel(config, store, host = createHostActions(config.
       const readSettings = can(user, "environment") || can(user, "reboot");
       const [update, settings] = await Promise.all([readUpdate ? updateStatus() : undefined, readSettings ? host.readSettings() : undefined]);
       return html(res, 200, systemPage(user, { pending: store?.pending(), paused: accounts.outgoingPaused(),
+        careersDay: can(user, "careers_schedule") ? accounts.careersDay() : undefined,
         activity: can(user, "activity") ? accounts.activity() : [], update, settings, instanceId: config.admin.instanceId }, notice));
     }
     if (path === "/admin/users" || userId) {
@@ -438,7 +448,7 @@ export function createAdminPanel(config, store, host = createHostActions(config.
     }
   }
 
-  return { handle, outgoingPaused: accounts.outgoingPaused, close() {
+  return { handle, outgoingPaused: accounts.outgoingPaused, careersDay: accounts.careersDay, close() {
     closed = true;
     clearInterval(auditTimer);
     host.close?.();

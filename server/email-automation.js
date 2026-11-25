@@ -41,9 +41,9 @@ export function prepareEmailDelivery(config, onError) {
 
   return {
     store,
-    start(onListening, outgoingPaused) {
+    start(onListening, settings) {
       smtp.listen(2525, "0.0.0.0", () => {
-        stopWorker = startDeliveryWorker(config, store, transport, console, outgoingPaused);
+        stopWorker = startDeliveryWorker(config, store, transport, console, settings);
         console.log("Digest Bot is listening on SMTP 2525");
         onListening();
       });

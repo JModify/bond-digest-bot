@@ -4,6 +4,7 @@ import { SendEmailCommand, SESv2Client } from "@aws-sdk/client-sesv2";
 import { formatDigest, readDigest } from "../dist/core/digest.js";
 import { readEmailSubject } from "../dist/core/mime.js";
 import { linkDestination } from "../dist/core/sharepoint.js";
+import { appendCareersArticle, defaultCareersDay } from "./careers.js";
 
 const queuePollIntervalMs = 500;
 const pruneIntervalMs = 60_000;
@@ -43,7 +44,10 @@ export function retargetDigest(raw, from, recipient) {
   return Buffer.concat([Buffer.from([...preserved, `From: ${from}`, `To: ${recipient}`].join("\r\n"), "latin1"), raw.subarray(separator)]);
 }
 
-export function startDeliveryWorker(config, store, transport, log = console, outgoingPaused = () => false) {
+export function startDeliveryWorker(config, store, transport, log = console, {
+  outgoingPaused = () => false,
+  careersDay = () => defaultCareersDay,
+} = {}) {
   // JSDOM gets no script execution or external resource loader.
   const { window } = new JSDOM("");
   const logo = {
@@ -76,7 +80,9 @@ export function startDeliveryWorker(config, store, transport, log = console, out
         }
       }
       const preset = { from, subject: job.subject, recipient: job.recipient };
-      return { raw: Buffer.from(formatDigest(digest, preset, new Date(), logo, { automatic: true })), archive: true };
+      const date = new Date();
+      digest.articles = appendCareersArticle(digest.articles, date, careersDay());
+      return { raw: Buffer.from(formatDigest(digest, preset, date, logo, { automatic: true })), archive: true };
     } catch {
       return job.originalId
         ? { reason: "archive", detail: "The archived digest could not be read." }

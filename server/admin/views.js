@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { defaultCareersDay, weekdays } from "../careers.js";
 import { passwordHint } from "./accounts.js";
 import { adminPages, can, canManageRole, permissions } from "./permissions.js";
 
@@ -126,24 +127,43 @@ export function mailDetail(user, row, notice) {
     <section class="panel"><h2>Timeline</h2>${table(["Brisbane time", "Event", "Details"], events)}</section>`, { user, current: "mail", notice });
 }
 
-export function systemPage(user, { pending, paused, activity = [], update = { state: "disabled" }, settings, instanceId }, notice) {
+export function systemPage(user, {
+  pending, paused, careersDay = defaultCareersDay, activity = [], update = { state: "disabled" }, settings, instanceId,
+}, notice) {
   const runningUpdate = ["queued", "running"].includes(update.state);
   const updateAvailable = !runningUpdate && !["disabled", "unavailable"].includes(update.state);
   return page("System", `<h1>System</h1>
-    ${can(user, "digest_status") || can(user, "freeze") ? digestPanel(user, pending, paused) : ""}
+    ${digestPanel(user, pending, paused, careersDay)}
     ${can(user, "site_updates") ? siteUpdatesPanel(update, updateAvailable) : ""}
     ${can(user, "environment") ? environmentSettings(settings, updateAvailable, pending !== undefined) : ""}
     ${can(user, "reboot") ? rebootPanel(instanceId, settings?.SDC_ADMIN_EC2_INSTANCE_ID, runningUpdate, can(user, "site_updates") && updateAvailable) : ""}
     ${can(user, "activity") ? activityPanel(activity) : ""}`, { user, current: "system", notice });
 }
 
-function digestPanel(user, pending, paused) {
+function digestPanel(user, pending, paused, careersDay) {
+  const showStatus = can(user, "digest_status") || can(user, "freeze");
+  const showSchedule = can(user, "careers_schedule");
+  if (!showStatus && !showSchedule) return "";
   const state = pending === undefined ? "Disabled" : paused ? "Frozen" : "Listening";
   const controls = pending !== undefined && can(user, "freeze")
     ? post("system/mail", hidden("pause", String(!paused)), submit(paused ? "Resume" : "Freeze", "secondary")) : "";
-  return `<section class="panel"><h2>Digest Bot</h2>
-    <p><strong>State:</strong> ${state}<br><strong>Queued:</strong> ${pending ?? 0}</p>
-    ${controls}</section>`;
+  return `<section class="panel">
+    <div class="panel-heading"><h2>Digest Bot</h2>${controls}</div>
+    ${showStatus ? `<dl class="digest-metrics">
+      <div><dt>State</dt><dd class="digest-state" data-state="${state.toLowerCase()}">${state}</dd></div>
+      <div><dt>Queued</dt><dd>${pending ?? 0}</dd></div>
+    </dl>` : ""}
+    ${showSchedule ? careersSchedule(careersDay) : ""}
+  </section>`;
+}
+
+function careersSchedule(day) {
+  const options = weekdays.map((weekday) => `<option value="${weekday}"${weekday === day ? " selected" : ""}>${weekday}</option>`).join("");
+  const field = `<label>Include on<select name="weekday" aria-describedby="careers-schedule-hint" required>${options}</select></label>`;
+  return `<div class="digest-schedule">
+    <div><h3>Careers at Bond</h3><p id="careers-schedule-hint">Appends the article to automatic Staff News emails on this day (Brisbane time).</p></div>
+    ${post("system/careers", field, submit("Save schedule"), "inline-form")}
+  </div>`;
 }
 
 function siteUpdatesPanel(update, available) {

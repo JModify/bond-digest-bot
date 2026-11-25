@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
+import { defaultCareersDay, weekdays } from "../careers.js";
 import { transaction } from "../sqlite.js";
 import { defaultRoles } from "./permissions.js";
 
@@ -153,6 +154,11 @@ export function openAccounts(path) {
     return value ? JSON.parse(value) : undefined;
   }
 
+  function careersDay() {
+    const saved = getSetting.get("careers_day")?.value;
+    return weekdays.includes(saved) ? saved : defaultCareersDay;
+  }
+
   return {
     byName: (username) => withPermissions(byName.get(username)),
     byId: (id) => withPermissions(byId.get(id)),
@@ -234,6 +240,15 @@ export function openAccounts(path) {
       transaction(db, () => {
         setSetting.run("outgoing_paused", String(paused));
         record(actor, paused ? "Digest Bot frozen" : "Digest Bot resumed", "Outgoing mail queue");
+      });
+    },
+    careersDay,
+    setCareersDay(actor, day) {
+      transaction(db, () => {
+        const previous = careersDay();
+        if (day === previous) return;
+        setSetting.run("careers_day", day);
+        record(actor, "Careers at Bond schedule changed", `${previous} → ${day}`);
       });
     },
     pendingSiteUpdate,

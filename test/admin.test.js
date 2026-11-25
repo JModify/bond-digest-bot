@@ -57,6 +57,50 @@ async function waitFor(read, expected) {
   assert.equal(read(), expected);
 }
 
+test("appends Careers at Bond once on the configured Brisbane weekday", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-24T13:59:59Z") });
+  const accounts = openAccounts(":memory:");
+  const store = openStore(":memory:");
+  const sent = [];
+  const stop = startDeliveryWorker(config, store, { async send({ raw }) {
+    sent.push(parseEmail(raw));
+  } }, quiet, { careersDay: accounts.careersDay });
+  t.after(async () => { await stop(); store.close(); accounts.close(); });
+
+  const articleUrl = "https://bonduni.sharepoint.com/sites/ShowcaseNews/SitePages/Careers-at-Bond(3).aspx";
+  const withArticle = Buffer.from(fixture.toString().replace("<table>",
+    `<table><tr><td><a href="${articleUrl.replace("(3)", "%283%29")}?from=DigestNotification">Careers at Bond</a></td></tr>`));
+
+  async function send(raw = fixture) {
+    const id = sent.length + 1;
+    assert.equal(store.enqueueIncoming({ recipient: sender, subject: DEFAULT_PRESET.subject,
+      messageId: `<careers-${id}@example.org>`, raw }), "queued");
+    await waitFor(() => store.history.get(id)?.state, "sent");
+    const email = sent.at(-1);
+    const { window } = new JSDOM(email.html);
+    const links = [...window.document.querySelectorAll(".digest-articles h2 a")].map((link) => ({
+      title: link.textContent, href: link.getAttribute("href"),
+    }));
+    const thumbnail = window.document.querySelector('img[alt="Careers at Bond"]')?.getAttribute("src");
+    window.close();
+    return { email, links, thumbnail };
+  }
+
+  assert.deepEqual((await send()).links.map(({ title }) => title), ["Test story"]);
+  t.mock.timers.setTime(Date.parse("2026-11-24T14:00:00Z"));
+  const wednesday = await send(withArticle);
+  assert.equal(wednesday.email.subject, "Bond Staff News | Wednesday 25 November 2026");
+  assert.deepEqual(wednesday.links.map(({ title }) => title), ["Test story", "Careers at Bond"]);
+  assert.equal(wednesday.links.at(-1).href, articleUrl);
+  assert.match(wednesday.email.text, /Test story[\s\S]*Careers at Bond\r\nhttps:.*\r\nLooking for a new position\?/);
+  assert.equal(wednesday.email.images.get(wednesday.thumbnail.slice(4)).type, "image/png");
+
+  accounts.setCareersDay("jlavagna", "Thursday");
+  assert.deepEqual((await send()).links.map(({ title }) => title), ["Test story"]);
+  t.mock.timers.setTime(Date.parse("2026-11-25T14:00:00Z"));
+  assert.deepEqual((await send()).links.map(({ title }) => title), ["Test story", "Careers at Bond"]);
+});
+
 test("archives the formatted digest, resends it once and retains history after queue cleanup", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "digest-history-"));
   const path = join(dir, "queue.sqlite");
@@ -301,13 +345,15 @@ test("protects maintenance and resends with roles, origin checks and revocable s
   const system = await request("/admin/system", { cookie });
   const systemHtml = await system.text();
   assert.match(systemHtml, /Environment settings/);
-  assert.match(systemHtml, /State:<\/strong> Listening<br><strong>Queued:<\/strong> 0/);
+  assert.match(systemHtml, /<dt>State<\/dt><dd class="digest-state" data-state="listening">Listening<\/dd>/);
+  assert.match(systemHtml, /<dt>Queued<\/dt><dd>0<\/dd>/);
   assert.match(systemHtml, />Freeze<\/button>/);
+  assert.match(systemHtml, /<option value="Wednesday" selected>/);
   assert.equal((await request("/admin/system/update", { cookie, body: {}, headers: { origin: "https://digest.bond-sdc.com" } })).status, 403);
   assert.equal((await request("/admin/system/mail", { cookie, body: { pause: "true" } })).status, 303);
   assert.equal(panel.outgoingPaused(), true);
   const frozenHtml = await (await request("/admin/system?notice=frozen", { cookie })).text();
-  assert.match(frozenHtml, /State:<\/strong> Frozen/);
+  assert.match(frozenHtml, /data-state="frozen">Frozen<\/dd>/);
   assert.match(frozenHtml, />Resume<\/button>/);
   assert.match(frozenHtml, /<script src="\/admin\/notice.js" defer><\/script>/);
   const noticeScript = await request("/admin/notice.js");
@@ -373,9 +419,11 @@ test("applies editable role permissions to pages, direct requests and active ses
   assert.match(viewer, /name="permission" value="email_history" checked/);
   assert.match(viewer, /name="permission" value="activity">/);
   assert.match(viewer, /name="permission" value="reboot">/);
+  assert.match(viewer, /name="permission" value="careers_schedule">/);
+  assert.equal((await request("/admin/system/careers", { cookie, body: { weekday: "Someday" } })).status, 400);
 
   const grants = (name, ...permissions) => new URLSearchParams([["name", name], ...permissions.map((permission) => ["permission", permission])]);
-  assert.equal((await request("/admin/roles", { cookie, body: grants("Delegated manager", "activity", "roles", "users") })).status, 303);
+  assert.equal((await request("/admin/roles", { cookie, body: grants("Delegated manager", "activity", "roles", "users", "careers_schedule") })).status, 303);
   const createdRoles = await (await request("/admin/roles", { cookie })).text();
   const roleId = createdRoles.match(/href="\/admin\/roles\/([a-f0-9]{16})">Edit<span class="sr-only"> Delegated manager/)[1];
   const delegatePassword = "Test delegated password 973";
@@ -386,6 +434,17 @@ test("applies editable role permissions to pages, direct requests and active ses
   const delegatedSystem = await (await request("/admin/system", { cookie: delegate })).text();
   assert.match(delegatedSystem, /<h2>Admin Activity<\/h2>/);
   assert.doesNotMatch(delegatedSystem, /<h2>(Environment settings|EC2 reboot)<\/h2>/);
+  assert.match(delegatedSystem, /action="\/admin\/system\/careers"/);
+  assert.doesNotMatch(delegatedSystem, /class="digest-metrics"/);
+  const saved = await request("/admin/system/careers", { cookie: delegate, body: { weekday: "Friday" } });
+  assert.equal(saved.status, 303);
+  assert.equal(saved.headers.get("location"), "/admin/system?notice=careers");
+  const afterSave = await (await request("/admin/system", { cookie })).text();
+  assert.match(afterSave, /<option value="Friday" selected>/);
+  assert.match(afterSave, /<td>Careers at Bond schedule changed<\/td><td>Wednesday → Friday<\/td>/);
+  const reopened = openAccounts(adminConfig.admin.databasePath);
+  assert.equal(reopened.careersDay(), "Friday");
+  reopened.close();
   assert.equal((await request("/admin/system/reboot", { cookie: delegate, body: { confirmation: "REBOOT" } })).status, 403);
   assert.equal((await request("/admin/roles", { cookie: delegate, body: grants("Auditor", "activity") })).status, 303);
   assert.equal((await request(`/admin/roles/${roleId}`, { cookie: delegate, body: grants("Delegated manager", "roles", "reboot") })).status, 403);
@@ -398,6 +457,7 @@ test("applies editable role permissions to pages, direct requests and active ses
   assert.equal((await request(`/admin/roles/${roleId}`, { cookie, body: grants("Delegated manager", "email_history") })).status, 303);
   assert.equal((await request("/admin/roles", { cookie: delegate })).status, 403);
   assert.equal((await request("/admin/system", { cookie: delegate })).status, 403);
+  assert.equal((await request("/admin/system/careers", { cookie: delegate, body: { weekday: "Monday" } })).status, 403);
   assert.equal((await request("/admin/mail", { cookie: delegate })).status, 200);
   const editHtml = await (await request("/admin/users/2", { cookie })).text();
   assert.match(editHtml, /action="\/admin\/users\/2\/delete" class="fields stacked-form"/);

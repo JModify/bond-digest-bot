@@ -92,6 +92,7 @@ function exampleDigest() {
 }
 
 test("returns digests once to authenticated senders from different organisations", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-24T00:00:00Z") });
   const store = openStore(":memory:");
   const accepted = [];
   const smtp = createSmtpServer(config, store, undefined, resolveKey);
