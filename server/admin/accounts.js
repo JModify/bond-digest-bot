@@ -1,3 +1,5 @@
+// Stores admin users, roles, sessions, settings and activity in a separate SQLite database.
+
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -21,6 +23,8 @@ export function validPassword(value) {
   return value.length >= 14 && value.length <= 128 && Buffer.byteLength(value, "utf8") <= 256;
 }
 
+// Store a per-password salt alongside the scrypt result so equal passwords produce different
+// hashes.
 export async function hashPassword(password) {
   const salt = randomBytes(16).toString("base64url");
   const key = await deriveKey(password, salt, 64);
@@ -29,6 +33,7 @@ export async function hashPassword(password) {
 
 export async function checkPassword(password, hash) {
   if (Buffer.byteLength(password, "utf8") > 256) return false;
+  // Run the same key derivation for unknown usernames to keep login timing comparable.
   const [salt, encoded] = (hash ?? "unprovisioned-account:").split(":");
   const expected = encoded ? Buffer.from(encoded, "base64url") : emptyHash;
   const key = await deriveKey(password, salt, 64);
@@ -43,8 +48,14 @@ function createAccountTables(db) {
   transaction(db, () => {
     const hasTable = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?");
     const needsRoles = !hasTable.get("admin_roles");
-    const migrate = hasTable.get("admin_users")
-      && !db.prepare("PRAGMA foreign_key_list(admin_users)").all().some(({ table }) => table === "admin_roles");
+    const migrate =
+      hasTable.get("admin_users") &&
+      !db
+        .prepare("PRAGMA foreign_key_list(admin_users)")
+        .all()
+        .some(({ table }) => table === "admin_roles");
+    // Upgrade the earlier built-in-role tables while preserving user IDs, sessions and the user ID
+    // sequence.
     if (migrate) {
       db.exec(`
         ALTER TABLE admin_sessions RENAME TO admin_sessions_legacy;
@@ -72,7 +83,8 @@ function createAccountTables(db) {
     `);
     if (needsRoles) {
       const insert = db.prepare("INSERT INTO admin_roles (id, name, permissions) VALUES (?, ?, ?)");
-      for (const [id, name, permissions] of defaultRoles) insert.run(id, name, JSON.stringify(permissions));
+      for (const [id, name, permissions] of defaultRoles)
+        insert.run(id, name, JSON.stringify(permissions));
     }
     if (migrate) {
       db.exec(`
@@ -84,7 +96,9 @@ function createAccountTables(db) {
         DROP TABLE admin_users_legacy;
       `);
     }
-    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS admin_only_one_owner ON admin_users(role) WHERE role = 'owner'`);
+    db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS admin_only_one_owner ON admin_users(role) WHERE role = 'owner'`,
+    );
   });
 }
 
@@ -114,10 +128,16 @@ export function openAccounts(path) {
   const byName = db.prepare(`SELECT ${access}, u.password_hash ${userRoles} WHERE u.username = ?`);
   const byId = db.prepare(`SELECT ${access}, u.password_hash ${userRoles} WHERE u.id = ?`);
   const users = db.prepare(`SELECT ${access} ${userRoles} ORDER BY u.role != 'owner', u.username`);
-  const insert = db.prepare("INSERT INTO admin_users (username, password_hash, role) VALUES (?, ?, ?)");
-  const update = db.prepare("UPDATE admin_users SET username = ?, role = ?, password_hash = COALESCE(?, password_hash) WHERE id = ?");
+  const insert = db.prepare(
+    "INSERT INTO admin_users (username, password_hash, role) VALUES (?, ?, ?)",
+  );
+  const update = db.prepare(
+    "UPDATE admin_users SET username = ?, role = ?, password_hash = COALESCE(?, password_hash) WHERE id = ?",
+  );
   const updatePassword = db.prepare("UPDATE admin_users SET password_hash = ? WHERE id = ?");
   const remove = db.prepare("DELETE FROM admin_users WHERE id = ?");
+  // Resolve a session against the current role on every request. Editing a role immediately changes
+  // its users' access.
   const getSession = db.prepare(`
     SELECT ${access} ${userRoles} JOIN admin_sessions s ON u.id = s.user_id WHERE s.token = ? AND s.expires > ?
   `);
@@ -128,11 +148,15 @@ export function openAccounts(path) {
   const role = db.prepare("SELECT id, name, permissions FROM admin_roles WHERE id = ?");
   const roleByName = db.prepare("SELECT id FROM admin_roles WHERE name = ?");
   const insertRole = db.prepare("INSERT INTO admin_roles (id, name, permissions) VALUES (?, ?, ?)");
-  const saveRole = db.prepare("UPDATE admin_roles SET name = ?, permissions = ? WHERE id = ? AND id != 'owner'");
+  const saveRole = db.prepare(
+    "UPDATE admin_roles SET name = ?, permissions = ? WHERE id = ? AND id != 'owner'",
+  );
   const removeRole = db.prepare(`
     DELETE FROM admin_roles WHERE id = ? AND id != 'owner' AND NOT EXISTS (SELECT 1 FROM admin_users WHERE role = admin_roles.id)
   `);
-  const createSession = db.prepare("INSERT INTO admin_sessions (token, user_id, expires) VALUES (?, ?, ?)");
+  const createSession = db.prepare(
+    "INSERT INTO admin_sessions (token, user_id, expires) VALUES (?, ?, ?)",
+  );
   const deleteSession = db.prepare("DELETE FROM admin_sessions WHERE token = ?");
   const deleteUserSessions = db.prepare("DELETE FROM admin_sessions WHERE user_id = ?");
   const deleteExpired = db.prepare("DELETE FROM admin_sessions WHERE expires <= ?");
@@ -141,10 +165,17 @@ export function openAccounts(path) {
     INSERT INTO admin_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `);
   const deleteSetting = db.prepare("DELETE FROM admin_settings WHERE key = ?");
-  const insertActivity = db.prepare("INSERT INTO admin_activity (at, actor, action, detail) VALUES (?, ?, ?, ?)");
-  const activity = db.prepare("SELECT at, actor, action, detail FROM admin_activity ORDER BY at DESC, id DESC LIMIT 20");
-  const lastActivity = db.prepare("SELECT at FROM admin_activity WHERE action = ? ORDER BY id DESC LIMIT 1");
+  const insertActivity = db.prepare(
+    "INSERT INTO admin_activity (at, actor, action, detail) VALUES (?, ?, ?, ?)",
+  );
+  const activity = db.prepare(
+    "SELECT at, actor, action, detail FROM admin_activity ORDER BY at DESC, id DESC LIMIT 20",
+  );
+  const lastActivity = db.prepare(
+    "SELECT at FROM admin_activity WHERE action = ? ORDER BY id DESC LIMIT 1",
+  );
 
+  // Store an actor label so activity remains readable after an account is renamed or deleted.
   function record(actor, action, detail, now = Date.now()) {
     return Number(insertActivity.run(now, actor, action, detail).lastInsertRowid);
   }
@@ -186,6 +217,8 @@ export function openAccounts(path) {
       });
     },
     hasOwner: () => Boolean(owner.get()),
+    // The bootstrap command creates or resets the sole owner account. Resetting also invalidates
+    // its sessions.
     provision(hash, reset) {
       return transaction(db, () => {
         const existing = owner.get();
@@ -207,7 +240,8 @@ export function openAccounts(path) {
     updateUser(actor, current, username, role, hash) {
       transaction(db, () => {
         update.run(username, role.id, hash, current.id);
-        if (hash || username !== current.username || role.id !== current.role) deleteUserSessions.run(current.id);
+        if (hash || username !== current.username || role.id !== current.role)
+          deleteUserSessions.run(current.id);
         record(actor, "User edited", `${current.username} → ${username} (${role.name})`);
       });
     },
@@ -224,6 +258,8 @@ export function openAccounts(path) {
         record(user.username, "Password changed", user.username);
       });
     },
+    // Return the random token to the route for the cookie. Store only its hash and expiration in
+    // SQLite.
     signIn(user, now = Date.now()) {
       const token = randomBytes(32).toString("base64url");
       transaction(db, () => {
@@ -235,6 +271,8 @@ export function openAccounts(path) {
     },
     session: (token, now = Date.now()) => withPermissions(getSession.get(tokenHash(token), now)),
     signOut: (token) => deleteSession.run(tokenHash(token)),
+    // The delivery worker reads these settings at runtime, so saving them takes effect without a
+    // restart.
     outgoingPaused: () => getSetting.get("outgoing_paused")?.value === "true",
     pauseOutgoing(actor, paused) {
       transaction(db, () => {
@@ -252,6 +290,8 @@ export function openAccounts(path) {
       });
     },
     pendingSiteUpdate,
+    // Persist the pending request so the panel can record the final result across a container
+    // rebuild.
     startSiteUpdate(actor, kind, previousUpdatedAt) {
       return transaction(db, () => {
         if (pendingSiteUpdate()) return undefined;
@@ -265,7 +305,12 @@ export function openAccounts(path) {
     finishSiteUpdate(pending, succeeded, detail, at) {
       transaction(db, () => {
         if (pendingSiteUpdate()?.id !== pending.id) return;
-        record(pending.actor, `${siteAction[pending.kind]} ${succeeded ? "completed" : "failed"}`, detail, at);
+        record(
+          pending.actor,
+          `${siteAction[pending.kind]} ${succeeded ? "completed" : "failed"}`,
+          detail,
+          at,
+        );
         deleteSetting.run("site_update");
       });
     },

@@ -1,3 +1,6 @@
+// Keeps the durable Email History rows, timeline events and compressed outgoing messages in the
+// queue database.
+
 import { gunzipSync, gzipSync } from "node:zlib";
 import { transaction } from "./sqlite.js";
 
@@ -32,13 +35,24 @@ export function createHistory(db) {
     CREATE INDEX IF NOT EXISTS digest_events_history ON digest_history_events(history_id, id);
   `);
 
+  // Give existing records stable public IDs for admin URLs while keeping integer keys for SQLite
+  // joins.
   transaction(db, () => {
-    if (!db.prepare("PRAGMA table_info(digest_history)").all().some(({ name }) => name === "public_id")) {
+    if (
+      !db
+        .prepare("PRAGMA table_info(digest_history)")
+        .all()
+        .some(({ name }) => name === "public_id")
+    ) {
       db.exec("ALTER TABLE digest_history ADD COLUMN public_id TEXT");
     }
-    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS digest_history_public_id ON digest_history(public_id)");
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS digest_history_public_id ON digest_history(public_id)",
+    );
     const missing = db.prepare("SELECT 1 FROM digest_history WHERE public_id IS NULL LIMIT 1");
-    const assign = db.prepare(`UPDATE OR IGNORE digest_history SET public_id = ${newPublicId} WHERE public_id IS NULL`);
+    const assign = db.prepare(
+      `UPDATE OR IGNORE digest_history SET public_id = ${newPublicId} WHERE public_id IS NULL`,
+    );
     while (missing.get()) assign.run();
   });
 
@@ -47,18 +61,26 @@ export function createHistory(db) {
     VALUES (${newPublicId}, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(public_id) DO NOTHING
   `);
-  const event = db.prepare("INSERT INTO digest_history_events (history_id, at, event, detail) VALUES (?, ?, ?, ?)");
+  const event = db.prepare(
+    "INSERT INTO digest_history_events (history_id, at, event, detail) VALUES (?, ?, ?, ?)",
+  );
   const status = db.prepare(`
     UPDATE digest_history SET state = ?, ses_message_id = COALESCE(?, ses_message_id) WHERE id = ?
   `);
-  const saveMime = db.prepare("UPDATE digest_history SET output_subject = ?, mime = ? WHERE id = ? AND mime IS NULL");
+  const saveMime = db.prepare(
+    "UPDATE digest_history SET output_subject = ?, mime = ? WHERE id = ? AND mime IS NULL",
+  );
+  // A resend refers back to its original archive. Only the original row needs to store the MIME
+  // bytes.
   const fields = `h.id, h.public_id, h.kind, h.original_id, original.public_id AS original_public_id, h.source, h.recipient,
     h.subject, COALESCE(h.output_subject, original.output_subject) AS output_subject, h.created_at, h.state, h.actor, h.ses_message_id,
     CASE WHEN h.original_id IS NULL THEN h.mime IS NOT NULL ELSE original.mime IS NOT NULL END AS can_resend`;
   const history = `SELECT ${fields} FROM digest_history AS h LEFT JOIN digest_history AS original ON original.id = h.original_id`;
   const detail = db.prepare(`${history} WHERE h.id = ?`);
   const publicDetail = db.prepare(`${history} WHERE h.public_id = ?`);
-  const events = db.prepare("SELECT at, event, detail FROM digest_history_events WHERE history_id = ? ORDER BY id");
+  const events = db.prepare(
+    "SELECT at, event, detail FROM digest_history_events WHERE history_id = ? ORDER BY id",
+  );
   const count = db.prepare("SELECT count(*) AS total FROM digest_history");
   const countState = db.prepare("SELECT count(*) AS total FROM digest_history WHERE state = ?");
   const list = db.prepare(`${history} ORDER BY h.id DESC LIMIT ? OFFSET ?`);
@@ -71,21 +93,45 @@ export function createHistory(db) {
   }
 
   return {
-    add({ kind, originalId = null, requestKey = null, source = "", recipient = "", subject = "", at, state, actor = null,
-      eventName = state, description = "" }) {
+    add({
+      kind,
+      originalId = null,
+      requestKey = null,
+      source = "",
+      recipient = "",
+      subject = "",
+      at,
+      state,
+      actor = null,
+      eventName = state,
+      description = "",
+    }) {
       let result;
       do {
-        result = insert.run(kind, originalId, requestKey, source, recipient, subject, at, state, actor);
+        result = insert.run(
+          kind,
+          originalId,
+          requestKey,
+          source,
+          recipient,
+          subject,
+          at,
+          state,
+          actor,
+        );
       } while (!result.changes);
       const id = Number(result.lastInsertRowid);
       note(id, at, eventName, description);
       return id;
     },
     note,
+    // Update the summary status and append a matching timeline event. The store wraps this with the
+    // corresponding queue write.
     mark(id, at, state, description = "", sesMessageId = null) {
       status.run(state, sesMessageId, id);
       note(id, at, state, description);
     },
+    // Store the first formatted copy so retries and resends can reproduce its content.
     archive(id, subject, raw) {
       saveMime.run(subject, gzipSync(raw, { level: 1 }), id);
     },

@@ -1,3 +1,4 @@
+# Automatic mail overlay. Caddy provisions the certificate used by SMTP STARTTLS.
 x-smtp-certificate-dir: &smtp-certificate-dir caddy/certificates/acme-v02.api.letsencrypt.org-directory/mail.bond-sdc.com
 
 services:
@@ -19,6 +20,7 @@ services:
       retries: 24
 
   digest-bot:
+    # The listener reads its certificate at startup. Wait for both Caddy files.
     depends_on:
       service-desk-central:
         condition: service_healthy
@@ -31,8 +33,10 @@ services:
       DIGEST_TLS_CERT_FILE: /run/digest-tls/mail.bond-sdc.com.crt
       DIGEST_TLS_KEY_FILE: /run/digest-tls/mail.bond-sdc.com.key
     ports:
+      # Microsoft 365 and other sending servers connect to the EC2 SMTP port.
       - "25:2525"
     volumes:
+      # Keep the queue and Email History on the EC2 host across container replacements.
       - type: bind
         source: ./var/data
         target: /data

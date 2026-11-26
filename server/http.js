@@ -1,6 +1,10 @@
+// Serves the public browser app, health check, group address and optional admin routes.
+
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 
+// Serve known file types under dist, core and assets. This pattern excludes arbitrary paths and
+// filenames.
 const staticPath = /^\/(?:(?:assets|core)\/)?[a-z0-9][a-z0-9-]*\.(html|css|js|png|webp)$/;
 const contentTypes = {
   html: "text/html; charset=UTF-8",
@@ -12,7 +16,10 @@ const contentTypes = {
 const dist = new URL("../dist/", import.meta.url);
 
 function json(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json; charset=UTF-8", "Cache-Control": "no-store" });
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=UTF-8",
+    "Cache-Control": "no-store",
+  });
   res.end(JSON.stringify(body));
 }
 
@@ -24,9 +31,12 @@ export function createWebServer(config, log = console, admin) {
     res.setHeader("X-Content-Type-Options", "nosniff");
 
     if (path === "/admin" || path.startsWith("/admin/")) {
-      return admin ? admin.handle(req, res, url) : json(res, 404, { message: "Administration is not configured." });
+      return admin
+        ? admin.handle(req, res, url)
+        : json(res, 404, { message: "Administration is not configured." });
     }
     if (path === "/healthz" && isRead) return json(res, 200, { ok: true });
+    // Expose just the address the Automatic tab needs to show.
     if (path === "/api/email" && isRead && config.emailDeliveryEnabled) {
       return json(res, 200, { groupAddress: config.groupAddress });
     }
@@ -35,7 +45,10 @@ export function createWebServer(config, log = console, admin) {
       try {
         const content = await readFile(new URL(file.slice(1), dist));
         const extension = file.split(".").at(-1);
-        res.writeHead(200, { "Content-Type": contentTypes[extension], "Cache-Control": "no-cache" });
+        res.writeHead(200, {
+          "Content-Type": contentTypes[extension],
+          "Cache-Control": "no-cache",
+        });
         return res.end(req.method === "HEAD" ? undefined : content);
       } catch (error) {
         if (error.code !== "ENOENT") throw error;

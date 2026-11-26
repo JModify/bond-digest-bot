@@ -1,3 +1,5 @@
+// Bridges the admin panel to the EC2 updater files and the separate EC2 reboot API.
+
 import { randomUUID } from "node:crypto";
 import { access, link, readFile, unlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -9,14 +11,21 @@ export function createHostActions(config) {
   const statusPath = updateDir && join(updateDir, "status", "update.json");
   let ec2;
 
+  // The presence of a request file helps distinguish queued work from a stale host status.
   async function updateStatus() {
     if (!requestPath) return { state: "disabled", detail: "Host updater is not configured." };
     try {
-      const exists = await access(requestPath, constants.F_OK).then(() => true, () => false);
+      const exists = await access(requestPath, constants.F_OK).then(
+        () => true,
+        () => false,
+      );
       const result = JSON.parse(await readFile(statusPath, "utf8"));
-      if (typeof result.state !== "string" || typeof result.detail !== "string") throw new Error("Invalid host status");
-      if (exists && result.state !== "running") return { state: "queued", detail: "Waiting for the host to start the request." };
-      if (!exists && result.state === "running") return { ...result, state: "unknown", detail: "The host did not record a final result." };
+      if (typeof result.state !== "string" || typeof result.detail !== "string")
+        throw new Error("Invalid host status");
+      if (exists && result.state !== "running")
+        return { state: "queued", detail: "Waiting for the host to start the request." };
+      if (!exists && result.state === "running")
+        return { ...result, state: "unknown", detail: "The host did not record a final result." };
       return result;
     } catch {
       return { state: "unavailable", detail: "Could not read the host updater status." };
@@ -49,10 +58,14 @@ export function createHostActions(config) {
         await unlink(staging);
       }
     },
+    // Create the EC2 client only when the panel submits a reboot request. This action bypasses the
+    // host request file.
     async reboot() {
       const { EC2Client, RebootInstancesCommand } = await import("@aws-sdk/client-ec2");
       ec2 ??= new EC2Client({ region: config.region, maxAttempts: 1 });
-      return ec2.send(new RebootInstancesCommand({ InstanceIds: [config.instanceId] }), { abortSignal: AbortSignal.timeout(10_000) });
+      return ec2.send(new RebootInstancesCommand({ InstanceIds: [config.instanceId] }), {
+        abortSignal: AbortSignal.timeout(10_000),
+      });
     },
     close: () => ec2?.destroy(),
   };

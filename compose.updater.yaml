@@ -1,3 +1,4 @@
+# Optional Admin System controls. The host reads requests and publishes status.
 services:
   digest-bot:
     environment:
@@ -11,6 +12,7 @@ services:
       - type: bind
         source: /var/lib/bond-sdc-admin/status
         target: /run/sdc-admin/status
+        # The container can write requests. Only the host publishes results.
         read_only: true
         bind:
           create_host_path: false

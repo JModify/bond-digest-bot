@@ -1,3 +1,5 @@
+// Covers the admin panel with temporary SQLite databases and a stand-in host updater.
+
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -19,23 +21,40 @@ import { openStore } from "../server/store.js";
 import { parseEmail } from "../dist/core/mime.js";
 import { DEFAULT_PRESET } from "../dist/core/preset.js";
 
-const config = loadConfig({ DIGEST_EMAIL_DELIVERY_ENABLED: "true", DIGEST_GROUP_ADDRESS: "news@example.org" });
+const config = loadConfig({
+  DIGEST_EMAIL_DELIVERY_ENABLED: "true",
+  DIGEST_GROUP_ADDRESS: "news@example.org",
+});
 const sender = "staff@example.org";
-const fixture = Buffer.from([
-  `From: ${sender}`, "Subject: Original staff digest", "Content-Type: text/html; charset=UTF-8", "",
-  '<html><body><table><tr><td><a href="https://example.sharepoint.com/sites/News/SitePages/Test.aspx">Test story</a>',
-  "<p>Sample summary</p></td></tr></table></body></html>", "",
-].join("\r\n"));
+const fixture = Buffer.from(
+  [
+    `From: ${sender}`,
+    "Subject: Original staff digest",
+    "Content-Type: text/html; charset=UTF-8",
+    "",
+    '<html><body><table><tr><td><a href="https://example.sharepoint.com/sites/News/SitePages/Test.aspx">Test story</a>',
+    "<p>Sample summary</p></td></tr></table></body></html>",
+    "",
+  ].join("\r\n"),
+);
 const actionKey = "b0219890-7a66-49d5-9dbb-9532ab17e36a";
 const quiet = { error() {}, info() {}, warn() {} };
 
 test("shows whether the reboot instance ID has been applied to Digest Bot", () => {
   const user = { username: "jlavagna", role: "owner" };
   const instanceId = "i-0123456789abcdef0";
-  const state = { pending: 0, paused: false, activity: [], update: { state: "ready", detail: "Ready" } };
+  const state = {
+    pending: 0,
+    paused: false,
+    activity: [],
+    update: { state: "ready", detail: "Ready" },
+  };
 
   const missing = systemPage(user, state);
-  assert.match(missing, /running Digest Bot container has an empty <code>SDC_ADMIN_EC2_INSTANCE_ID/);
+  assert.match(
+    missing,
+    /running Digest Bot container has an empty <code>SDC_ADMIN_EC2_INSTANCE_ID/,
+  );
   assert.doesNotMatch(missing, /action="\/admin\/system\/reboot"/);
 
   const settings = { SDC_ADMIN_EC2_INSTANCE_ID: instanceId };
@@ -62,43 +81,87 @@ test("appends Careers at Bond once on the configured Brisbane weekday", async (t
   const accounts = openAccounts(":memory:");
   const store = openStore(":memory:");
   const sent = [];
-  const stop = startDeliveryWorker(config, store, { async send({ raw }) {
-    sent.push(parseEmail(raw));
-  } }, quiet, { careersDay: accounts.careersDay });
-  t.after(async () => { await stop(); store.close(); accounts.close(); });
+  const stop = startDeliveryWorker(
+    config,
+    store,
+    {
+      async send({ raw }) {
+        sent.push(parseEmail(raw));
+      },
+    },
+    quiet,
+    { careersDay: accounts.careersDay },
+  );
+  t.after(async () => {
+    await stop();
+    store.close();
+    accounts.close();
+  });
 
-  const articleUrl = "https://bonduni.sharepoint.com/sites/ShowcaseNews/SitePages/Careers-at-Bond(3).aspx";
-  const withArticle = Buffer.from(fixture.toString().replace("<table>",
-    `<table><tr><td><a href="${articleUrl.replace("(3)", "%283%29")}?from=DigestNotification">Careers at Bond</a></td></tr>`));
+  const articleUrl =
+    "https://bonduni.sharepoint.com/sites/ShowcaseNews/SitePages/Careers-at-Bond(3).aspx";
+  const withArticle = Buffer.from(
+    fixture
+      .toString()
+      .replace(
+        "<table>",
+        `<table><tr><td><a href="${articleUrl.replace("(3)", "%283%29")}?from=DigestNotification">Careers at Bond</a></td></tr>`,
+      ),
+  );
 
   async function send(raw = fixture) {
     const id = sent.length + 1;
-    assert.equal(store.enqueueIncoming({ recipient: sender, subject: DEFAULT_PRESET.subject,
-      messageId: `<careers-${id}@example.org>`, raw }), "queued");
+    assert.equal(
+      store.enqueueIncoming({
+        recipient: sender,
+        subject: DEFAULT_PRESET.subject,
+        messageId: `<careers-${id}@example.org>`,
+        raw,
+      }),
+      "queued",
+    );
     await waitFor(() => store.history.get(id)?.state, "sent");
     const email = sent.at(-1);
     const { window } = new JSDOM(email.html);
     const links = [...window.document.querySelectorAll(".digest-articles h2 a")].map((link) => ({
-      title: link.textContent, href: link.getAttribute("href"),
+      title: link.textContent,
+      href: link.getAttribute("href"),
     }));
-    const thumbnail = window.document.querySelector('img[alt="Careers at Bond"]')?.getAttribute("src");
+    const thumbnail = window.document
+      .querySelector('img[alt="Careers at Bond"]')
+      ?.getAttribute("src");
     window.close();
     return { email, links, thumbnail };
   }
 
-  assert.deepEqual((await send()).links.map(({ title }) => title), ["Test story"]);
+  assert.deepEqual(
+    (await send()).links.map(({ title }) => title),
+    ["Test story"],
+  );
   t.mock.timers.setTime(Date.parse("2026-11-24T14:00:00Z"));
   const wednesday = await send(withArticle);
   assert.equal(wednesday.email.subject, "Bond Staff News | Wednesday 25 November 2026");
-  assert.deepEqual(wednesday.links.map(({ title }) => title), ["Test story", "Careers at Bond"]);
+  assert.deepEqual(
+    wednesday.links.map(({ title }) => title),
+    ["Test story", "Careers at Bond"],
+  );
   assert.equal(wednesday.links.at(-1).href, articleUrl);
-  assert.match(wednesday.email.text, /Test story[\s\S]*Careers at Bond\r\nhttps:.*\r\nLooking for a new position\?/);
+  assert.match(
+    wednesday.email.text,
+    /Test story[\s\S]*Careers at Bond\r\nhttps:.*\r\nLooking for a new position\?/,
+  );
   assert.equal(wednesday.email.images.get(wednesday.thumbnail.slice(4)).type, "image/png");
 
   accounts.setCareersDay("jlavagna", "Thursday");
-  assert.deepEqual((await send()).links.map(({ title }) => title), ["Test story"]);
+  assert.deepEqual(
+    (await send()).links.map(({ title }) => title),
+    ["Test story"],
+  );
   t.mock.timers.setTime(Date.parse("2026-11-25T14:00:00Z"));
-  assert.deepEqual((await send()).links.map(({ title }) => title), ["Test story", "Careers at Bond"]);
+  assert.deepEqual(
+    (await send()).links.map(({ title }) => title),
+    ["Test story", "Careers at Bond"],
+  );
 });
 
 test("archives the formatted digest, resends it once and retains history after queue cleanup", async (t) => {
@@ -107,13 +170,26 @@ test("archives the formatted digest, resends it once and retains history after q
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   let store = openStore(path);
   const jobs = [];
-  const stop = startDeliveryWorker(config, store, { async send(job) {
-    jobs.push(job);
-    return { MessageId: `ses-${jobs.length}` };
-  } }, quiet);
+  const stop = startDeliveryWorker(
+    config,
+    store,
+    {
+      async send(job) {
+        jobs.push(job);
+        return { MessageId: `ses-${jobs.length}` };
+      },
+    },
+    quiet,
+  );
   try {
-    const message = { recipient: sender, subject: DEFAULT_PRESET.subject, sourceSubject: "Original staff digest", method: "spf",
-      messageId: "<staff-news-1@example.org>", raw: fixture };
+    const message = {
+      recipient: sender,
+      subject: DEFAULT_PRESET.subject,
+      sourceSubject: "Original staff digest",
+      method: "spf",
+      messageId: "<staff-news-1@example.org>",
+      raw: fixture,
+    };
     assert.equal(store.enqueueIncoming(message), "queued");
     assert.equal(store.enqueueIncoming(message), "duplicate");
     await waitFor(() => store.history.get(1).state, "sent");
@@ -122,7 +198,10 @@ test("archives the formatted digest, resends it once and retains history after q
     assert.equal(incoming.subject, "Original staff digest");
     assert.match(incoming.public_id, /^D-[0-9A-F]{10}$/);
     assert.equal(store.history.get(incoming.public_id).id, incoming.id);
-    assert.deepEqual(incoming.events.map(({ event }) => event), ["received", "queued", "duplicate", "processing", "sending", "sent"]);
+    assert.deepEqual(
+      incoming.events.map(({ event }) => event),
+      ["received", "queued", "duplicate", "processing", "sending", "sent"],
+    );
 
     const to = "individual@example.net";
     const request = { originalId: 1, recipient: to, requestKey: actionKey, actor: "jlavagna" };
@@ -175,11 +254,19 @@ test("migrates old queue records and keeps interrupted or rejected statuses accu
   const store = openStore(path);
   try {
     store.recover(30);
-    assert.deepEqual(store.history.get(1).events.map(({ event }) => event), ["imported"]);
+    assert.deepEqual(
+      store.history.get(1).events.map(({ event }) => event),
+      ["imported"],
+    );
     assert.equal(store.history.get(1).state, "sent");
     assert.equal(store.history.get(1).can_resend, 0);
     assert.equal(store.history.get(2).state, "uncertain");
-    for (let i = 0; i < 26; i++) store.recordSmtpAttempt({ source: sender, state: "rejected", description: "SMTP 550: authentication rejected." });
+    for (let i = 0; i < 26; i++)
+      store.recordSmtpAttempt({
+        source: sender,
+        state: "rejected",
+        description: "SMTP 550: authentication rejected.",
+      });
     const { total, pages, rows } = store.history.page(2, "rejected");
     assert.equal(total, 26);
     assert.equal(pages, 2);
@@ -200,7 +287,9 @@ test("backfills stable IDs for existing email history", (t) => {
   oldStore.recordSmtpAttempt({ source: sender, state: "rejected", description: "Legacy attempt" });
   oldStore.close();
   const legacy = new DatabaseSync(path);
-  legacy.exec("DROP INDEX digest_history_public_id; ALTER TABLE digest_history DROP COLUMN public_id");
+  legacy.exec(
+    "DROP INDEX digest_history_public_id; ALTER TABLE digest_history DROP COLUMN public_id",
+  );
   legacy.close();
 
   const migrated = openStore(path);
@@ -232,7 +321,9 @@ test("migrates admin accounts and active sessions with the existing role permiss
     DELETE FROM admin_users WHERE id = 9;
   `);
   const token = "existing-token";
-  legacy.prepare("INSERT INTO admin_sessions VALUES (?, 2, ?)").run(createHash("sha256").update(token).digest("hex"), Date.now() + 60000);
+  legacy
+    .prepare("INSERT INTO admin_sessions VALUES (?, 2, ?)")
+    .run(createHash("sha256").update(token).digest("hex"), Date.now() + 60000);
   legacy.close();
 
   const migrated = openAccounts(path);
@@ -254,26 +345,38 @@ test("migrates admin accounts and active sessions with the existing role permiss
   }
 });
 
+// Start an HTTP listener on a free local port and retain the admin host and origin checks.
 async function startAdmin(adminConfig, store, host) {
   const { origin, host: hostname } = adminConfig.admin;
   const panel = createAdminPanel(adminConfig, store, host);
   const web = createWebServer(adminConfig, quiet, panel).listen(0, "127.0.0.1");
   await once(web, "listening");
   const base = `http://127.0.0.1:${web.address().port}`;
-  const request = (path, { cookie, body, headers } = {}) => new Promise((resolve, reject) => {
-    const payload = body ? new URLSearchParams(body).toString() : undefined;
-    const input = httpRequest(base + path, {
-      method: body ? "POST" : "GET",
-      headers: { host: hostname, ...(cookie ? { cookie } : {}),
-        ...(body ? { origin, "content-type": "application/x-www-form-urlencoded" } : {}), ...headers },
-    }, async (res) => {
-      const chunks = [];
-      for await (const chunk of res) chunks.push(chunk);
-      resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers }));
+  const request = (path, { cookie, body, headers } = {}) =>
+    new Promise((resolve, reject) => {
+      const payload = body ? new URLSearchParams(body).toString() : undefined;
+      const input = httpRequest(
+        base + path,
+        {
+          method: body ? "POST" : "GET",
+          headers: {
+            host: hostname,
+            ...(cookie ? { cookie } : {}),
+            ...(body ? { origin, "content-type": "application/x-www-form-urlencoded" } : {}),
+            ...headers,
+          },
+        },
+        async (res) => {
+          const chunks = [];
+          for await (const chunk of res) chunks.push(chunk);
+          resolve(
+            new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers }),
+          );
+        },
+      );
+      input.on("error", reject);
+      input.end(payload);
     });
-    input.on("error", reject);
-    input.end(payload);
-  });
   const login = async (username, value) => {
     const response = await request("/admin/login", { body: { username, password: value } });
     assert.equal(response.status, 303);
@@ -281,17 +384,30 @@ async function startAdmin(adminConfig, store, host) {
     assert.match(header, /Secure; HttpOnly; SameSite=Strict/);
     return header.split(";")[0];
   };
-  return { panel, request, login, async close() {
-    await new Promise((resolve) => web.close(resolve));
-    panel.close();
-  } };
+  return {
+    panel,
+    request,
+    login,
+    async close() {
+      await new Promise((resolve) => web.close(resolve));
+      panel.close();
+    },
+  };
 }
 
 const origin = "https://bond-sdc.com";
 const password = "Test owner password 471";
 async function provisionAdmin(dir, extra = {}) {
-  const adminConfig = { ...config, admin: { origin, host: "bond-sdc.com", databasePath: join(dir, "admin.sqlite"),
-    instanceId: "i-0123456789abcdef0", ...extra } };
+  const adminConfig = {
+    ...config,
+    admin: {
+      origin,
+      host: "bond-sdc.com",
+      databasePath: join(dir, "admin.sqlite"),
+      instanceId: "i-0123456789abcdef0",
+      ...extra,
+    },
+  };
   const owner = openAccounts(adminConfig.admin.databasePath);
   owner.provision(await hashPassword(password), false);
   owner.close();
@@ -304,14 +420,29 @@ test("protects maintenance and resends with roles, origin checks and revocable s
   const requested = [];
   let hostStatus = { state: "ready", detail: "Ready" };
   const host = {
-    async updateStatus() { return hostStatus; },
-    async readSettings() { return { ACME_EMAIL: "admin@example.org", DIGEST_GROUP_ADDRESS: config.groupAddress }; },
-    async request(action) { requested.push(action); return true; },
-    async reboot() { requested.push({ kind: "reboot" }); },
+    async updateStatus() {
+      return hostStatus;
+    },
+    async readSettings() {
+      return { ACME_EMAIL: "admin@example.org", DIGEST_GROUP_ADDRESS: config.groupAddress };
+    },
+    async request(action) {
+      requested.push(action);
+      return true;
+    },
+    async reboot() {
+      requested.push({ kind: "reboot" });
+    },
   };
   const outgoing = "Bond Staff News | Wednesday 25 November 2026";
   const store = openStore(":memory:");
-  store.enqueueIncoming({ recipient: sender, subject: outgoing, sourceSubject: "<test title>", messageId: "<example@example.org>", raw: fixture });
+  store.enqueueIncoming({
+    recipient: sender,
+    subject: outgoing,
+    sourceSubject: "<test title>",
+    messageId: "<example@example.org>",
+    raw: fixture,
+  });
   const job = store.claim();
   store.sending(job.id, { raw: fixture, subject: outgoing });
   store.finish(job.id, "sent", null, { messageId: "test-123" });
@@ -324,13 +455,25 @@ test("protects maintenance and resends with roles, origin checks and revocable s
   const signInPage = await request("/admin");
   assert.equal(signInPage.headers.get("referrer-policy"), "same-origin");
   assert.equal((await request("/admin/mail")).status, 303);
-  assert.equal((await request("/admin/mail", { headers: { host: "digest.bond-sdc.com" } })).status, 404);
-  assert.equal((await request("/admin/login", { body: {}, headers: { origin: "null" } })).status, 403);
-  assert.equal((await request("/admin/login", { body: { username: "jlavagna", password: "admin" } })).status, 401);
+  assert.equal(
+    (await request("/admin/mail", { headers: { host: "digest.bond-sdc.com" } })).status,
+    404,
+  );
+  assert.equal(
+    (await request("/admin/login", { body: {}, headers: { origin: "null" } })).status,
+    403,
+  );
+  assert.equal(
+    (await request("/admin/login", { body: { username: "jlavagna", password: "admin" } })).status,
+    401,
+  );
   const cookie = await login("jlavagna", password);
   const mail = new JSDOM(await (await request("/admin/mail", { cookie })).text()).window.document;
   assert.equal(mail.querySelector("h1").textContent, "Digest Bot Email History");
-  assert.deepEqual([...mail.querySelectorAll("th")].map((cell) => cell.textContent), ["ID", "Queued", "Subject", "Send To", "Status"]);
+  assert.deepEqual(
+    [...mail.querySelectorAll("th")].map((cell) => cell.textContent),
+    ["ID", "Queued", "Subject", "Send To", "Status"],
+  );
   const cells = mail.querySelector("tbody tr").cells;
   const recordPath = cells[0].firstElementChild.getAttribute("href");
   assert.equal(recordPath, `/admin/mail/${store.history.get(1).public_id}`);
@@ -345,12 +488,27 @@ test("protects maintenance and resends with roles, origin checks and revocable s
   const system = await request("/admin/system", { cookie });
   const systemHtml = await system.text();
   assert.match(systemHtml, /Environment settings/);
-  assert.match(systemHtml, /<dt>State<\/dt><dd class="digest-state" data-state="listening">Listening<\/dd>/);
+  assert.match(
+    systemHtml,
+    /<dt>State<\/dt><dd class="digest-state" data-state="listening">Listening<\/dd>/,
+  );
   assert.match(systemHtml, /<dt>Queued<\/dt><dd>0<\/dd>/);
   assert.match(systemHtml, />Freeze<\/button>/);
   assert.match(systemHtml, /<option value="Wednesday" selected>/);
-  assert.equal((await request("/admin/system/update", { cookie, body: {}, headers: { origin: "https://digest.bond-sdc.com" } })).status, 403);
-  assert.equal((await request("/admin/system/mail", { cookie, body: { pause: "true" } })).status, 303);
+  assert.equal(
+    (
+      await request("/admin/system/update", {
+        cookie,
+        body: {},
+        headers: { origin: "https://digest.bond-sdc.com" },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await request("/admin/system/mail", { cookie, body: { pause: "true" } })).status,
+    303,
+  );
   assert.equal(panel.outgoingPaused(), true);
   const frozenHtml = await (await request("/admin/system?notice=frozen", { cookie })).text();
   assert.match(frozenHtml, /data-state="frozen">Frozen<\/dd>/);
@@ -358,7 +516,10 @@ test("protects maintenance and resends with roles, origin checks and revocable s
   assert.match(frozenHtml, /<script src="\/admin\/notice.js" defer><\/script>/);
   const noticeScript = await request("/admin/notice.js");
   assert.match(noticeScript.headers.get("content-type"), /text\/javascript/);
-  const { window } = new JSDOM(frozenHtml, { url: `${origin}/admin/system?notice=frozen`, runScripts: "outside-only" });
+  const { window } = new JSDOM(frozenHtml, {
+    url: `${origin}/admin/system?notice=frozen`,
+    runScripts: "outside-only",
+  });
   let expireNotice;
   window.setTimeout = (callback, duration) => {
     assert.equal(duration, 6000);
@@ -370,37 +531,94 @@ test("protects maintenance and resends with roles, origin checks and revocable s
   expireNotice();
   assert.equal(window.document.querySelector(".notice"), null);
   window.close();
-  assert.equal((await request("/admin/system/mail", { cookie, body: { pause: "false" } })).status, 303);
+  assert.equal(
+    (await request("/admin/system/mail", { cookie, body: { pause: "false" } })).status,
+    303,
+  );
   assert.equal(panel.outgoingPaused(), false);
 
-  const values = { ACME_EMAIL: "admin@example.org", DIGEST_GROUP_ADDRESS: "team@example.org", SDC_ADMIN_EC2_INSTANCE_ID: "i-0123456789abcdef0" };
-  assert.equal((await request("/admin/system/settings", { cookie, body: { ...values, ACME_EMAIL: "${SECRET}" } })).status, 400);
-  assert.equal((await request("/admin/system/settings", { cookie, body: { ...values, AWS_SECRET_ACCESS_KEY: "ignored" } })).status, 303);
+  const values = {
+    ACME_EMAIL: "admin@example.org",
+    DIGEST_GROUP_ADDRESS: "team@example.org",
+    SDC_ADMIN_EC2_INSTANCE_ID: "i-0123456789abcdef0",
+  };
+  assert.equal(
+    (
+      await request("/admin/system/settings", {
+        cookie,
+        body: { ...values, ACME_EMAIL: "${SECRET}" },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("/admin/system/settings", {
+        cookie,
+        body: { ...values, AWS_SECRET_ACCESS_KEY: "ignored" },
+      })
+    ).status,
+    303,
+  );
   assert.deepEqual(requested, [{ kind: "settings", values }]);
   assert.equal((await request("/admin/system/update", { cookie, body: {} })).status, 303);
-  hostStatus = { state: "succeeded", updatedAt: new Date().toISOString(), detail: "Both services passed the Compose startup checks." };
-  assert.equal((await request("/admin/system/reboot", { cookie, body: { confirmation: "REBOOT" } })).status, 303);
-  assert.equal((await request("/admin/system/reboot", { cookie, body: { confirmation: "REBOOT" } })).status, 409);
+  hostStatus = {
+    state: "succeeded",
+    updatedAt: new Date().toISOString(),
+    detail: "Both services passed the Compose startup checks.",
+  };
+  assert.equal(
+    (await request("/admin/system/reboot", { cookie, body: { confirmation: "REBOOT" } })).status,
+    303,
+  );
+  assert.equal(
+    (await request("/admin/system/reboot", { cookie, body: { confirmation: "REBOOT" } })).status,
+    409,
+  );
   assert.deepEqual(requested.slice(1), [{ kind: "update" }, { kind: "reboot" }]);
 
   const viewerPassword = "Safe viewer password 527";
-  assert.equal((await request("/admin/users", { cookie, body: { username: "reader", password: viewerPassword, role: "viewer" } })).status, 303);
+  assert.equal(
+    (
+      await request("/admin/users", {
+        cookie,
+        body: { username: "reader", password: viewerPassword, role: "viewer" },
+      })
+    ).status,
+    303,
+  );
   const viewerCookie = await login("reader", viewerPassword);
   assert.equal((await request("/admin/mail", { cookie: viewerCookie })).status, 200);
   assert.equal((await request("/admin/system", { cookie: viewerCookie })).status, 200);
   assert.equal((await request("/admin/users", { cookie: viewerCookie })).status, 403);
-  assert.equal((await request("/admin/system/restart", { cookie: viewerCookie, body: {} })).status, 403);
+  assert.equal(
+    (await request("/admin/system/restart", { cookie: viewerCookie, body: {} })).status,
+    403,
+  );
   const resend = { request: actionKey, recipient: "one@example.net" };
-  assert.equal((await request(`${recordPath}/resend`, { cookie: viewerCookie, body: resend })).status, 403);
-  assert.equal((await request("/admin/users/2", { cookie, body: { username: "reader", role: "operator" } })).status, 303);
+  assert.equal(
+    (await request(`${recordPath}/resend`, { cookie: viewerCookie, body: resend })).status,
+    403,
+  );
+  assert.equal(
+    (await request("/admin/users/2", { cookie, body: { username: "reader", role: "operator" } }))
+      .status,
+    303,
+  );
   assert.equal((await request("/admin/mail", { cookie: viewerCookie })).status, 303);
   const operatorCookie = await login("reader", viewerPassword);
   const resent = await request(`${recordPath}/resend`, { cookie: operatorCookie, body: resend });
   assert.equal(resent.status, 303);
   assert.match(resent.headers.get("location"), /^\/admin\/mail\/D-[0-9A-F]{10}\?notice=resent$/);
-  assert.equal((await request("/admin/users/2/delete", { cookie, body: { confirm: "yes" } })).status, 303);
+  assert.equal(
+    (await request("/admin/users/2/delete", { cookie, body: { confirm: "yes" } })).status,
+    303,
+  );
   assert.equal((await request("/admin/mail", { cookie: operatorCookie })).status, 303);
-  assert.equal((await request("/admin/users/1/delete", { cookie, body: { confirm: "yes" } })).status, 404);
+  assert.equal(
+    (await request("/admin/users/1/delete", { cookie, body: { confirm: "yes" } })).status,
+    404,
+  );
 });
 
 test("applies editable role permissions to pages, direct requests and active sessions", async (t) => {
@@ -420,23 +638,54 @@ test("applies editable role permissions to pages, direct requests and active ses
   assert.match(viewer, /name="permission" value="activity">/);
   assert.match(viewer, /name="permission" value="reboot">/);
   assert.match(viewer, /name="permission" value="careers_schedule">/);
-  assert.equal((await request("/admin/system/careers", { cookie, body: { weekday: "Someday" } })).status, 400);
+  assert.equal(
+    (await request("/admin/system/careers", { cookie, body: { weekday: "Someday" } })).status,
+    400,
+  );
 
-  const grants = (name, ...permissions) => new URLSearchParams([["name", name], ...permissions.map((permission) => ["permission", permission])]);
-  assert.equal((await request("/admin/roles", { cookie, body: grants("Delegated manager", "activity", "roles", "users", "careers_schedule") })).status, 303);
+  const grants = (name, ...permissions) =>
+    new URLSearchParams([
+      ["name", name],
+      ...permissions.map((permission) => ["permission", permission]),
+    ]);
+  assert.equal(
+    (
+      await request("/admin/roles", {
+        cookie,
+        body: grants("Delegated manager", "activity", "roles", "users", "careers_schedule"),
+      })
+    ).status,
+    303,
+  );
   const createdRoles = await (await request("/admin/roles", { cookie })).text();
-  const roleId = createdRoles.match(/href="\/admin\/roles\/([a-f0-9]{16})">Edit<span class="sr-only"> Delegated manager/)[1];
+  const roleId = createdRoles.match(
+    /href="\/admin\/roles\/([a-f0-9]{16})">Edit<span class="sr-only"> Delegated manager/,
+  )[1];
   const delegatePassword = "Test delegated password 973";
-  assert.equal((await request("/admin/users", { cookie, body: { username: "delegate", role: roleId, password: delegatePassword } })).status, 303);
+  assert.equal(
+    (
+      await request("/admin/users", {
+        cookie,
+        body: { username: "delegate", role: roleId, password: delegatePassword },
+      })
+    ).status,
+    303,
+  );
   const delegate = await login("delegate", delegatePassword);
-  assert.equal((await request("/admin", { cookie: delegate })).headers.get("location"), "/admin/system");
+  assert.equal(
+    (await request("/admin", { cookie: delegate })).headers.get("location"),
+    "/admin/system",
+  );
   assert.equal((await request("/admin/mail", { cookie: delegate })).status, 403);
   const delegatedSystem = await (await request("/admin/system", { cookie: delegate })).text();
   assert.match(delegatedSystem, /<h2>Admin Activity<\/h2>/);
   assert.doesNotMatch(delegatedSystem, /<h2>(Environment settings|EC2 reboot)<\/h2>/);
   assert.match(delegatedSystem, /action="\/admin\/system\/careers"/);
   assert.doesNotMatch(delegatedSystem, /class="digest-metrics"/);
-  const saved = await request("/admin/system/careers", { cookie: delegate, body: { weekday: "Friday" } });
+  const saved = await request("/admin/system/careers", {
+    cookie: delegate,
+    body: { weekday: "Friday" },
+  });
   assert.equal(saved.status, 303);
   assert.equal(saved.headers.get("location"), "/admin/system?notice=careers");
   const afterSave = await (await request("/admin/system", { cookie })).text();
@@ -445,24 +694,79 @@ test("applies editable role permissions to pages, direct requests and active ses
   const reopened = openAccounts(adminConfig.admin.databasePath);
   assert.equal(reopened.careersDay(), "Friday");
   reopened.close();
-  assert.equal((await request("/admin/system/reboot", { cookie: delegate, body: { confirmation: "REBOOT" } })).status, 403);
-  assert.equal((await request("/admin/roles", { cookie: delegate, body: grants("Auditor", "activity") })).status, 303);
-  assert.equal((await request(`/admin/roles/${roleId}`, { cookie: delegate, body: grants("Delegated manager", "roles", "reboot") })).status, 403);
-  assert.equal((await request("/admin/roles/operator", { cookie: delegate, body: grants("Operator") })).status, 403);
-  assert.equal((await request("/admin/roles/owner", { cookie, body: grants("Other owner") })).status, 404);
-  assert.equal((await request("/admin/users", { cookie: delegate, body: { username: "newowner", role: "owner", password } })).status, 403);
-  assert.equal((await request("/admin/users/1/delete", { cookie: delegate, body: { confirm: "yes" } })).status, 404);
-  assert.equal((await request(`/admin/roles/${roleId}/delete`, { cookie, body: { confirm: "yes" } })).status, 409);
+  assert.equal(
+    (await request("/admin/system/reboot", { cookie: delegate, body: { confirmation: "REBOOT" } }))
+      .status,
+    403,
+  );
+  assert.equal(
+    (await request("/admin/roles", { cookie: delegate, body: grants("Auditor", "activity") }))
+      .status,
+    303,
+  );
+  assert.equal(
+    (
+      await request(`/admin/roles/${roleId}`, {
+        cookie: delegate,
+        body: grants("Delegated manager", "roles", "reboot"),
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await request("/admin/roles/operator", { cookie: delegate, body: grants("Operator") })).status,
+    403,
+  );
+  assert.equal(
+    (await request("/admin/roles/owner", { cookie, body: grants("Other owner") })).status,
+    404,
+  );
+  assert.equal(
+    (
+      await request("/admin/users", {
+        cookie: delegate,
+        body: { username: "newowner", role: "owner", password },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await request("/admin/users/1/delete", { cookie: delegate, body: { confirm: "yes" } })).status,
+    404,
+  );
+  assert.equal(
+    (await request(`/admin/roles/${roleId}/delete`, { cookie, body: { confirm: "yes" } })).status,
+    409,
+  );
 
-  assert.equal((await request(`/admin/roles/${roleId}`, { cookie, body: grants("Delegated manager", "email_history") })).status, 303);
+  assert.equal(
+    (
+      await request(`/admin/roles/${roleId}`, {
+        cookie,
+        body: grants("Delegated manager", "email_history"),
+      })
+    ).status,
+    303,
+  );
   assert.equal((await request("/admin/roles", { cookie: delegate })).status, 403);
   assert.equal((await request("/admin/system", { cookie: delegate })).status, 403);
-  assert.equal((await request("/admin/system/careers", { cookie: delegate, body: { weekday: "Monday" } })).status, 403);
+  assert.equal(
+    (await request("/admin/system/careers", { cookie: delegate, body: { weekday: "Monday" } }))
+      .status,
+    403,
+  );
   assert.equal((await request("/admin/mail", { cookie: delegate })).status, 200);
   const editHtml = await (await request("/admin/users/2", { cookie })).text();
   assert.match(editHtml, /action="\/admin\/users\/2\/delete" class="fields stacked-form"/);
-  assert.equal((await request("/admin/users/2", { cookie, body: { username: "delegate", role: "operator" } })).status, 303);
-  assert.equal((await request(`/admin/roles/${roleId}/delete`, { cookie, body: { confirm: "yes" } })).status, 303);
+  assert.equal(
+    (await request("/admin/users/2", { cookie, body: { username: "delegate", role: "operator" } }))
+      .status,
+    303,
+  );
+  assert.equal(
+    (await request(`/admin/roles/${roleId}/delete`, { cookie, body: { confirm: "yes" } })).status,
+    303,
+  );
   assert.equal((await request(`/admin/roles/${roleId}`, { cookie })).status, 404);
 });
 
@@ -472,7 +776,11 @@ test("records the host update result across a restart and limits Admin Activity 
   mkdirSync(join(dir, "status"));
   const requestPath = join(dir, "requests", "request.json");
   const statusPath = join(dir, "status", "update.json");
-  const setStatus = (state, detail) => writeFileSync(statusPath, JSON.stringify({ state, detail, updatedAt: new Date().toISOString() }));
+  const setStatus = (state, detail) =>
+    writeFileSync(
+      statusPath,
+      JSON.stringify({ state, detail, updatedAt: new Date().toISOString() }),
+    );
   setStatus("ready", "Ready");
   const adminConfig = await provisionAdmin(dir, { updateDir: dir });
   let admin = await startAdmin(adminConfig);
@@ -488,26 +796,40 @@ test("records the host update result across a restart and limits Admin Activity 
   const waiting = await activityHtml();
   assert.match(waiting, /<td>Site update requested<\/td>/);
   assert.doesNotMatch(waiting, /<td>Site update completed<\/td>/);
-  assert.equal((await admin.request("/admin/system/refresh-settings", { cookie, body: {} })).status, 409);
+  assert.equal(
+    (await admin.request("/admin/system/refresh-settings", { cookie, body: {} })).status,
+    409,
+  );
 
   await admin.close();
   setStatus("succeeded", "Both services passed the Compose startup checks.");
   rmSync(requestPath);
   admin = await startAdmin(adminConfig);
-  assert.match(await activityHtml(), /<td>Site update completed<\/td><td>Both services passed the Compose startup checks\.<\/td>/);
+  assert.match(
+    await activityHtml(),
+    /<td>Site update completed<\/td><td>Both services passed the Compose startup checks\.<\/td>/,
+  );
   assert.equal((await start()).status, 303);
   setStatus("failed", "bond-digest-bot has local changes to tracked files.");
   rmSync(requestPath);
   const failed = await activityHtml();
-  assert.match(failed, /<td>Site update failed<\/td><td>bond-digest-bot has local changes to tracked files\.<\/td>/);
+  assert.match(
+    failed,
+    /<td>Site update failed<\/td><td>bond-digest-bot has local changes to tracked files\.<\/td>/,
+  );
   assert.equal((await activityHtml()).match(/<td>Site update completed<\/td>/g).length, 1);
 
   const accounts = openAccounts(adminConfig.admin.databasePath);
   for (let i = 1; i <= 25; i++) accounts.record("test", "Audit test", `Entry ${i}`, Date.now() + i);
   accounts.close();
   const doc = new JSDOM(await activityHtml()).window.document;
-  const activity = [...doc.querySelectorAll(".panel")].find((section) => section.querySelector("h2").textContent === "Admin Activity");
-  assert.deepEqual([...activity.querySelectorAll("th")].map((cell) => cell.textContent), ["Time", "User", "Action", "Details"]);
+  const activity = [...doc.querySelectorAll(".panel")].find(
+    (section) => section.querySelector("h2").textContent === "Admin Activity",
+  );
+  assert.deepEqual(
+    [...activity.querySelectorAll("th")].map((cell) => cell.textContent),
+    ["Time", "User", "Action", "Details"],
+  );
   const rows = activity.querySelectorAll("tbody tr");
   assert.equal(rows.length, 20);
   assert.equal(rows[0].cells[3].textContent, "Entry 25");

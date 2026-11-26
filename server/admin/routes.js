@@ -1,15 +1,43 @@
+// Handles admin HTTP requests. Views render pages, while this module authorises routes and directs
+// each action.
+
 import { readFileSync } from "node:fs";
 import { normaliseAddress } from "../../dist/core/mailbox.js";
 import { weekdays } from "../careers.js";
-import { checkPassword, hashPassword, openAccounts, sessionSeconds, validPassword, validUsername } from "./accounts.js";
+import {
+  checkPassword,
+  hashPassword,
+  openAccounts,
+  sessionSeconds,
+  validPassword,
+  validUsername,
+} from "./accounts.js";
 import { createHostActions } from "./host.js";
 import { adminPages, can, canManageRole, canViewSystem, permissions } from "./permissions.js";
-import { accountPage, editRolePage, editUserPage, mailDetail, mailPage, messagePage, rolesPage, settingsFields, signIn,
-  statuses, systemPage, usersPage } from "./views.js";
+import {
+  accountPage,
+  editRolePage,
+  editUserPage,
+  mailDetail,
+  mailPage,
+  messagePage,
+  rolesPage,
+  settingsFields,
+  signIn,
+  statuses,
+  systemPage,
+  usersPage,
+} from "./views.js";
 
 const assets = {
-  "/admin/admin.css": ["text/css; charset=UTF-8", readFileSync(new URL("./admin.css", import.meta.url))],
-  "/admin/notice.js": ["text/javascript; charset=UTF-8", readFileSync(new URL("./notice.js", import.meta.url))],
+  "/admin/admin.css": [
+    "text/css; charset=UTF-8",
+    readFileSync(new URL("./admin.css", import.meta.url)),
+  ],
+  "/admin/notice.js": [
+    "text/javascript; charset=UTF-8",
+    readFileSync(new URL("./notice.js", import.meta.url)),
+  ],
 };
 const cookieName = "__Host-sdc-admin";
 const cookieOptions = "Path=/; Secure; HttpOnly; SameSite=Strict";
@@ -33,12 +61,22 @@ const notices = {
   "role-deleted": "Role deleted.",
 };
 
+// Translate form actions into the small set of operations the host updater accepts.
 const hostActions = {
   "/admin/system/update": { kind: "update", notice: "update" },
   "/admin/system/restart": { kind: "restart", notice: "restart" },
-  "/admin/system/settings": { kind: "settings", action: "Environment save requested", notice: "settings" },
-  "/admin/system/refresh-settings": { kind: "refresh", action: "Environment reload requested", notice: "refreshed" },
+  "/admin/system/settings": {
+    kind: "settings",
+    action: "Environment save requested",
+    notice: "settings",
+  },
+  "/admin/system/refresh-settings": {
+    kind: "refresh",
+    action: "Environment reload requested",
+    notice: "refreshed",
+  },
 };
+// Each System form has its own permission, independent of whether the user can open the page.
 const systemPermissions = {
   "/admin/system/mail": "freeze",
   "/admin/system/careers": "careers_schedule",
@@ -49,14 +87,21 @@ const systemPermissions = {
   "/admin/system/reboot": "reboot",
 };
 const landing = (user) => `/admin/${adminPages(user)[0][0]}`;
-const mailId = (value) => value.startsWith("D-") ? value : Number(value);
-const canManageUser = (user, account) => account && canManageRole(user, { id: account.role, permissions: account.permissions });
+const mailId = (value) => (value.startsWith("D-") ? value : Number(value));
+const canManageUser = (user, account) =>
+  account && canManageRole(user, { id: account.role, permissions: account.permissions });
 
 function readSettingsForm(form, automatic) {
-  const values = Object.fromEntries(Object.keys(settingsFields).map((key) => [key, form.get(key)?.trim() ?? ""]));
+  const values = Object.fromEntries(
+    Object.keys(settingsFields).map((key) => [key, form.get(key)?.trim() ?? ""]),
+  );
   const supportedEmail = (value) => normaliseAddress(value) && /^[a-z0-9_.+%@-]+$/i.test(value);
-  if (!supportedEmail(values.ACME_EMAIL) || ((automatic || values.DIGEST_GROUP_ADDRESS) && !supportedEmail(values.DIGEST_GROUP_ADDRESS))
-      || (values.SDC_ADMIN_EC2_INSTANCE_ID && !/^i-(?:[a-f0-9]{8}|[a-f0-9]{17})$/.test(values.SDC_ADMIN_EC2_INSTANCE_ID))) {
+  if (
+    !supportedEmail(values.ACME_EMAIL) ||
+    ((automatic || values.DIGEST_GROUP_ADDRESS) && !supportedEmail(values.DIGEST_GROUP_ADDRESS)) ||
+    (values.SDC_ADMIN_EC2_INSTANCE_ID &&
+      !/^i-(?:[a-f0-9]{8}|[a-f0-9]{17})$/.test(values.SDC_ADMIN_EC2_INSTANCE_ID))
+  ) {
     throw new FormError(400, "Check the email addresses and EC2 instance ID.");
   }
   return values;
@@ -69,12 +114,14 @@ class FormError extends Error {
   }
 }
 
+// Check the declared size and enforce the same limit while streaming the form body.
 async function readForm(req) {
   if (req.headers["content-type"]?.split(";")[0] !== "application/x-www-form-urlencoded") {
     throw new FormError(415, "Submit the form from the admin panel.");
   }
   const limit = 8192;
-  if (Number(req.headers["content-length"]) > limit) throw new FormError(413, "The form is too large.");
+  if (Number(req.headers["content-length"]) > limit)
+    throw new FormError(413, "The form is too large.");
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
@@ -104,7 +151,8 @@ function clearSession(res) {
 }
 
 function errorPage(res, status, message, user) {
-  const title = status === 404 ? "Page not found" : status === 403 ? "Access denied" : "Action unavailable";
+  const title =
+    status === 404 ? "Page not found" : status === 403 ? "Access denied" : "Action unavailable";
   html(res, status, messagePage(title, message, user));
 }
 
@@ -120,6 +168,7 @@ export function createAdminPanel(config, store, host = createHostActions(config.
   let startingHostAction = false;
   let closed = false;
 
+  // Record only the host result that belongs to the outstanding maintenance request.
   async function updateStatus() {
     const pending = accounts.pendingSiteUpdate();
     const result = await host.updateStatus();
@@ -130,7 +179,11 @@ export function createAdminPanel(config, store, host = createHostActions(config.
       if (current && ["succeeded", "failed", "unknown"].includes(result.state)) {
         accounts.finishSiteUpdate(pending, result.state === "succeeded", result.detail, at);
       } else if (Date.now() - pending.at >= siteUpdateDeadlineMs) {
-        accounts.finishSiteUpdate(pending, false, "The host did not report a final result. Check the bond-sdc-admin service log on EC2.");
+        accounts.finishSiteUpdate(
+          pending,
+          false,
+          "The host did not report a final result. Check the bond-sdc-admin service log on EC2.",
+        );
       }
     }
     return result;
@@ -142,6 +195,7 @@ export function createAdminPanel(config, store, host = createHostActions(config.
     }
   }, 5000).unref();
 
+  // Throttle repeated IP attempts and bound the number of concurrent scrypt checks.
   async function login(req, res, form) {
     const now = Date.now();
     const client = req.headers["x-sdc-admin-client"] || req.socket.remoteAddress;
@@ -152,7 +206,11 @@ export function createAdminPanel(config, store, host = createHostActions(config.
     const last = failedAttempts.get(client);
     const attempt = last?.expires > now ? last : { failures: 0, expires: now + 15 * 60_000 };
     if (attempt.failures >= 8 || activeSignIns >= 4 || (!last && failedAttempts.size >= 1024)) {
-      return html(res, 429, signIn({ ready: true, error: "Too many attempts. Try again in a few minutes." }));
+      return html(
+        res,
+        429,
+        signIn({ ready: true, error: "Too many attempts. Try again in a few minutes." }),
+      );
     }
     activeSignIns++;
     attempt.failures++;
@@ -166,7 +224,10 @@ export function createAdminPanel(config, store, host = createHostActions(config.
       }
       failedAttempts.delete(client);
       const token = accounts.signIn(account);
-      res.setHeader("Set-Cookie", `${cookieName}=${token}; ${cookieOptions}; Max-Age=${sessionSeconds}`);
+      res.setHeader(
+        "Set-Cookie",
+        `${cookieName}=${token}; ${cookieOptions}; Max-Age=${sessionSeconds}`,
+      );
       return redirect(res, landing(account));
     } finally {
       activeSignIns--;
@@ -176,9 +237,11 @@ export function createAdminPanel(config, store, host = createHostActions(config.
   async function manageUser(res, user, token, form, id, deleting) {
     if (deleting) {
       const account = accounts.byId(id);
-      if (!account || account.role === "owner") return errorPage(res, 404, "The user cannot be deleted here.", user);
+      if (!account || account.role === "owner")
+        return errorPage(res, 404, "The user cannot be deleted here.", user);
       if (!canManageUser(user, account)) return denied(res, user);
-      if (form.get("confirm") !== "yes") return errorPage(res, 400, "Confirm the account deletion.", user);
+      if (form.get("confirm") !== "yes")
+        return errorPage(res, 400, "Confirm the account deletion.", user);
       accounts.removeUser(user.username, account);
       return redirect(res, "/admin/users?notice=deleted");
     }
@@ -187,9 +250,16 @@ export function createAdminPanel(config, store, host = createHostActions(config.
     const password = form.get("password") ?? "";
     const roleId = form.get("role");
     if (!validUsername(username) || !roleId || ((!id || password) && !validPassword(password))) {
-      return errorPage(res, 400, "Use a valid username and role. New passwords need at least 14 characters.", user);
+      return errorPage(
+        res,
+        400,
+        "Use a valid username and role. New passwords need at least 14 characters.",
+        user,
+      );
     }
     const hash = password ? await hashPassword(password) : null;
+    // Password hashing yields to other requests. Re-read the session and role before saving
+    // anything.
     user = accounts.session(token);
     if (!user) return errorPage(res, 401, "Sign in to continue.");
     const role = accounts.role(roleId);
@@ -197,13 +267,15 @@ export function createAdminPanel(config, store, host = createHostActions(config.
     if (!role) return errorPage(res, 400, "Choose an existing role.", user);
     if (!canManageRole(user, role)) return denied(res, user);
     const existing = accounts.byName(username);
-    if (existing && existing.id !== id) return errorPage(res, 409, "That username is already in use.", user);
+    if (existing && existing.id !== id)
+      return errorPage(res, 409, "That username is already in use.", user);
     if (!id) {
       accounts.addUser(user.username, username, role, hash);
       return redirect(res, "/admin/users?notice=added");
     }
     const account = accounts.byId(id);
-    if (!account || account.role === "owner") return errorPage(res, 404, "The user cannot be edited here.", user);
+    if (!account || account.role === "owner")
+      return errorPage(res, 404, "The user cannot be edited here.", user);
     if (!canManageUser(user, account)) return denied(res, user);
     accounts.updateUser(user.username, account, username, role, hash);
     return redirect(res, "/admin/users?notice=edited");
@@ -211,10 +283,12 @@ export function createAdminPanel(config, store, host = createHostActions(config.
 
   function manageRole(res, user, form, id, deleting) {
     const role = id ? accounts.role(id) : undefined;
-    if (id && (!role || role.id === "owner")) return errorPage(res, 404, "The role cannot be changed here.", user);
+    if (id && (!role || role.id === "owner"))
+      return errorPage(res, 404, "The role cannot be changed here.", user);
     if (role && !canManageRole(user, role)) return denied(res, user);
     if (deleting) {
-      if (form.get("confirm") !== "yes") return errorPage(res, 400, "Confirm the role deletion.", user);
+      if (form.get("confirm") !== "yes")
+        return errorPage(res, 400, "Confirm the role deletion.", user);
       if (!accounts.deleteRole(user.username, role)) {
         return errorPage(res, 409, "Reassign the users with this role before deleting it.", user);
       }
@@ -223,50 +297,80 @@ export function createAdminPanel(config, store, host = createHostActions(config.
 
     const name = (form.get("name") ?? "").trim();
     const grants = [...new Set(form.getAll("permission"))];
-    if (!name || name.length > 40 || /[\u0000-\u001f\u007f]/.test(name) || grants.some((grant) => !Object.hasOwn(permissions, grant))) {
+    if (
+      !name ||
+      name.length > 40 ||
+      /[\u0000-\u001f\u007f]/.test(name) ||
+      grants.some((grant) => !Object.hasOwn(permissions, grant))
+    ) {
       return errorPage(res, 400, "Enter a role name and select valid permissions.", user);
     }
     if (grants.some((grant) => !can(user, grant))) return denied(res, user);
     const existing = accounts.roleByName(name);
-    if (existing && existing.id !== id) return errorPage(res, 409, "That role name is already in use.", user);
+    if (existing && existing.id !== id)
+      return errorPage(res, 409, "That role name is already in use.", user);
     if (!role) {
       accounts.addRole(user.username, name, grants);
       return redirect(res, "/admin/roles?notice=role-added");
     }
     accounts.updateRole(user.username, role, name, grants);
-    const next = user.role === id && !grants.includes("roles") ? landing({ ...user, permissions: grants }) : "/admin/roles";
+    const next =
+      user.role === id && !grants.includes("roles")
+        ? landing({ ...user, permissions: grants })
+        : "/admin/roles";
     return redirect(res, `${next}?notice=role-edited`);
   }
 
   async function changePassword(res, user, form) {
     const password = form.get("password") ?? "";
-    if (!validPassword(password)) return errorPage(res, 400, "New passwords need at least 14 characters.", user);
+    if (!validPassword(password))
+      return errorPage(res, 400, "New passwords need at least 14 characters.", user);
     const current = accounts.byId(user.id)?.password_hash;
-    if (!await checkPassword(form.get("current") ?? "", current)) return errorPage(res, 400, "The current password is incorrect.", user);
+    if (!(await checkPassword(form.get("current") ?? "", current)))
+      return errorPage(res, 400, "The current password is incorrect.", user);
     const hash = await hashPassword(password);
-    if (accounts.byId(user.id)?.password_hash !== current) return errorPage(res, 409, "Your account changed. Sign in again.", user);
+    if (accounts.byId(user.id)?.password_hash !== current)
+      return errorPage(res, 409, "Your account changed. Sign in again.", user);
     accounts.changePassword(user, hash);
     clearSession(res);
     return redirect(res, "/admin");
   }
 
+  // Write an idempotent resend request to the worker's queue. The normal worker sends from the
+  // stored MIME archive.
   function resend(res, user, form, id) {
     if (!can(user, "resend")) return denied(res, user);
     if (!store) return errorPage(res, 409, "Automatic delivery is disabled.", user);
     const recipient = normaliseAddress(form.get("recipient")).toLowerCase();
     const requestKey = form.get("request") ?? "";
-    if (!recipient || !allowedRecipientRequest.test(requestKey)
-        || [config.groupAddress, config.inboxAddress, config.from.toLowerCase()].includes(recipient)) {
-      return errorPage(res, 400, "Enter one recipient mailbox. Digest Bot and its group addresses cannot receive resends.", user);
+    if (
+      !recipient ||
+      !allowedRecipientRequest.test(requestKey) ||
+      [config.groupAddress, config.inboxAddress, config.from.toLowerCase()].includes(recipient)
+    ) {
+      return errorPage(
+        res,
+        400,
+        "Enter one recipient mailbox. Digest Bot and its group addresses cannot receive resends.",
+        user,
+      );
     }
     const original = store.history.get(id);
     if (!original) return errorPage(res, 404, "The formatted email is unavailable.", user);
-    const result = store.queueResend({ originalId: original.id, recipient, requestKey, actor: user.username });
-    if (result.state === "unavailable") return errorPage(res, 404, "The formatted email is unavailable.", user);
-    if (result.state === "busy") return errorPage(res, 503, "The mail queue is full. Try again shortly.", user);
+    const result = store.queueResend({
+      originalId: original.id,
+      recipient,
+      requestKey,
+      actor: user.username,
+    });
+    if (result.state === "unavailable")
+      return errorPage(res, 404, "The formatted email is unavailable.", user);
+    if (result.state === "busy")
+      return errorPage(res, 503, "The mail queue is full. Try again shortly.", user);
     return redirect(res, `/admin/mail/${store.history.get(result.id).public_id}?notice=resent`);
   }
 
+  // Recheck permission after reading host status, then record and forward the requested action.
   async function requestHostAction(res, token, path, form) {
     const status = await updateStatus();
     const user = accounts.session(token);
@@ -278,17 +382,31 @@ export function createAdminPanel(config, store, host = createHostActions(config.
     if (Object.hasOwn(hostActions, path)) {
       const { kind, action, notice } = hostActions[path];
       if (Date.now() - (accounts.lastActivity("EC2 reboot requested") ?? 0) < 300_000) {
-        return errorPage(res, 409, "Wait five minutes after requesting an EC2 reboot before using host controls.", user);
+        return errorPage(
+          res,
+          409,
+          "Wait five minutes after requesting an EC2 reboot before using host controls.",
+          user,
+        );
       }
-      const payload = kind === "settings" ? { kind, values: readSettingsForm(form, Boolean(store)) } : { kind };
+      const payload =
+        kind === "settings" ? { kind, values: readSettingsForm(form, Boolean(store)) } : { kind };
       const siteUpdate = kind === "update" || kind === "restart";
-      const pending = siteUpdate ? accounts.startSiteUpdate(user.username, kind, status.updatedAt) : undefined;
-      if (siteUpdate && !pending) return errorPage(res, 409, "A site update is already in progress.", user);
+      const pending = siteUpdate
+        ? accounts.startSiteUpdate(user.username, kind, status.updatedAt)
+        : undefined;
+      if (siteUpdate && !pending)
+        return errorPage(res, 409, "A site update is already in progress.", user);
       let queued;
       try {
         queued = await host.request(payload);
       } catch (error) {
-        if (pending) accounts.finishSiteUpdate(pending, false, "The panel could not submit the request to the host updater.");
+        if (pending)
+          accounts.finishSiteUpdate(
+            pending,
+            false,
+            "The panel could not submit the request to the host updater.",
+          );
         throw error;
       }
       if (!queued) {
@@ -304,7 +422,12 @@ export function createAdminPanel(config, store, host = createHostActions(config.
         return errorPage(res, 400, "Configure EC2 reboot and type REBOOT to confirm.", user);
       }
       if (Date.now() - (accounts.lastActivity("EC2 reboot requested") ?? 0) < 300_000) {
-        return errorPage(res, 409, "Wait five minutes after requesting an EC2 reboot before retrying.", user);
+        return errorPage(
+          res,
+          409,
+          "Wait five minutes after requesting an EC2 reboot before retrying.",
+          user,
+        );
       }
       accounts.record(user.username, "EC2 reboot requested", config.admin.instanceId);
       try {
@@ -315,17 +438,31 @@ export function createAdminPanel(config, store, host = createHostActions(config.
         const status = error.$metadata?.httpStatusCode;
         const rejected = status >= 400 && status < 500 && status !== 408;
         const name = /^[a-z0-9_.-]{1,80}$/i.test(error.name ?? "") ? error.name : "Request error";
-        accounts.record(user.username, rejected ? "EC2 reboot rejected" : "EC2 reboot unconfirmed", name);
-        return errorPage(res, 502, rejected ? "AWS rejected the reboot. Check the instance role and region." : "The reboot result is unconfirmed. Check the EC2 console before retrying.", user);
+        accounts.record(
+          user.username,
+          rejected ? "EC2 reboot rejected" : "EC2 reboot unconfirmed",
+          name,
+        );
+        return errorPage(
+          res,
+          502,
+          rejected
+            ? "AWS rejected the reboot. Check the instance role and region."
+            : "The reboot result is unconfirmed. Check the EC2 console before retrying.",
+          user,
+        );
       }
     }
     return errorPage(res, 404, "This action does not exist.", user);
   }
 
+  // Freeze and Careers changes are local settings. Site maintenance requests go through the host
+  // bridge.
   async function changeSystem(res, user, token, path, form) {
     if (path === "/admin/system/mail") {
       const pause = form.get("pause");
-      if (!store || !["true", "false"].includes(pause)) return errorPage(res, 409, "Automatic delivery is unavailable.", user);
+      if (!store || !["true", "false"].includes(pause))
+        return errorPage(res, 409, "Automatic delivery is unavailable.", user);
       accounts.pauseOutgoing(user.username, pause === "true");
       return redirect(res, `/admin/system?notice=${pause === "true" ? "frozen" : "resumed"}`);
     }
@@ -345,7 +482,9 @@ export function createAdminPanel(config, store, host = createHostActions(config.
   }
 
   async function view(res, user, path, params, recordId, userId, roleId) {
-    const notice = Object.hasOwn(notices, params.get("notice")) ? notices[params.get("notice")] : undefined;
+    const notice = Object.hasOwn(notices, params.get("notice"))
+      ? notices[params.get("notice")]
+      : undefined;
     if (path === "/admin/mail") {
       const requested = Number(params.get("page"));
       const page = Number.isSafeInteger(requested) && requested >= 1 ? requested : 1;
@@ -357,12 +496,31 @@ export function createAdminPanel(config, store, host = createHostActions(config.
       if (row) return html(res, 200, mailDetail(user, row, notice));
     }
     if (path === "/admin/system") {
-      const readUpdate = ["site_updates", "environment", "reboot", "activity"].some((permission) => can(user, permission));
+      const readUpdate = ["site_updates", "environment", "reboot", "activity"].some((permission) =>
+        can(user, permission),
+      );
       const readSettings = can(user, "environment") || can(user, "reboot");
-      const [update, settings] = await Promise.all([readUpdate ? updateStatus() : undefined, readSettings ? host.readSettings() : undefined]);
-      return html(res, 200, systemPage(user, { pending: store?.pending(), paused: accounts.outgoingPaused(),
-        careersDay: can(user, "careers_schedule") ? accounts.careersDay() : undefined,
-        activity: can(user, "activity") ? accounts.activity() : [], update, settings, instanceId: config.admin.instanceId }, notice));
+      const [update, settings] = await Promise.all([
+        readUpdate ? updateStatus() : undefined,
+        readSettings ? host.readSettings() : undefined,
+      ]);
+      return html(
+        res,
+        200,
+        systemPage(
+          user,
+          {
+            pending: store?.pending(),
+            paused: accounts.outgoingPaused(),
+            careersDay: can(user, "careers_schedule") ? accounts.careersDay() : undefined,
+            activity: can(user, "activity") ? accounts.activity() : [],
+            update,
+            settings,
+            instanceId: config.admin.instanceId,
+          },
+          notice,
+        ),
+      );
     }
     if (path === "/admin/users" || userId) {
       const roles = accounts.roles().filter((role) => canManageRole(user, role));
@@ -385,13 +543,19 @@ export function createAdminPanel(config, store, host = createHostActions(config.
     return errorPage(res, 404, "This page does not exist.", user);
   }
 
+  // Check the configured host and the origin of writes before resolving a session or dispatching
+  // routes.
   async function handle(req, res, url) {
-    if (req.headers.host?.toLowerCase() !== config.admin.host) return errorPage(res, 404, "This page does not exist.");
+    if (req.headers.host?.toLowerCase() !== config.admin.host)
+      return errorPage(res, 404, "This page does not exist.");
     res.setHeader("Cache-Control", "no-store");
     // A no-referrer policy makes native form submissions send Origin: null.
     res.setHeader("Referrer-Policy", "same-origin");
     res.setHeader("X-Frame-Options", "DENY");
-    res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    );
     const path = url.pathname.replace(/\/$/, "");
     if (req.method === "GET" && Object.hasOwn(assets, path)) {
       const [contentType, content] = assets[path];
@@ -399,8 +563,10 @@ export function createAdminPanel(config, store, host = createHostActions(config.
       return res.end(content);
     }
     const post = req.method === "POST";
-    if (!post && req.method !== "GET") return errorPage(res, 405, "Use the admin panel in a browser.");
-    if (post && req.headers.origin !== config.admin.origin) return errorPage(res, 403, "Submit the form from the admin panel.");
+    if (!post && req.method !== "GET")
+      return errorPage(res, 405, "Use the admin panel in a browser.");
+    if (post && req.headers.origin !== config.admin.origin)
+      return errorPage(res, 403, "Submit the form from the admin panel.");
     const token = readToken(req);
     let user = token && accounts.session(token);
     try {
@@ -423,14 +589,28 @@ export function createAdminPanel(config, store, host = createHostActions(config.
         user = accounts.session(token);
         if (!user) return errorPage(res, 401, "Sign in to continue.");
       }
-      const systemPermission = Object.hasOwn(systemPermissions, path) ? systemPermissions[path] : undefined;
-      if (((path === "/admin/mail" || mail) && !can(user, "email_history"))
-          || ((path === "/admin/users" || account) && !can(user, "users"))
-          || ((path === "/admin/roles" || role) && !can(user, "roles"))
-          || (path === "/admin/system" && !canViewSystem(user))
-          || (systemPermission && !can(user, systemPermission))) return denied(res, user);
-      if (!post) return view(res, user, path, url.searchParams, mail && !mail[2] ? mailId(mail[1]) : undefined,
-        account && !account[2] ? Number(account[1]) : undefined, role && !role[2] ? role[1] : undefined);
+      // Enforce the permissions on direct requests as well as the controls generated by the views.
+      const systemPermission = Object.hasOwn(systemPermissions, path)
+        ? systemPermissions[path]
+        : undefined;
+      if (
+        ((path === "/admin/mail" || mail) && !can(user, "email_history")) ||
+        ((path === "/admin/users" || account) && !can(user, "users")) ||
+        ((path === "/admin/roles" || role) && !can(user, "roles")) ||
+        (path === "/admin/system" && !canViewSystem(user)) ||
+        (systemPermission && !can(user, systemPermission))
+      )
+        return denied(res, user);
+      if (!post)
+        return view(
+          res,
+          user,
+          path,
+          url.searchParams,
+          mail && !mail[2] ? mailId(mail[1]) : undefined,
+          account && !account[2] ? Number(account[1]) : undefined,
+          role && !role[2] ? role[1] : undefined,
+        );
       if (path === "/admin/logout") {
         accounts.signOut(token);
         clearSession(res);
@@ -438,8 +618,17 @@ export function createAdminPanel(config, store, host = createHostActions(config.
       }
       if (mail?.[2]) return resend(res, user, form, mailId(mail[1]));
       if (path === "/admin/account") return changePassword(res, user, form);
-      if (path === "/admin/users" || account) return await manageUser(res, user, token, form, account ? Number(account[1]) : null, Boolean(account?.[2]));
-      if (path === "/admin/roles" || role) return manageRole(res, user, form, role?.[1], Boolean(role?.[2]));
+      if (path === "/admin/users" || account)
+        return await manageUser(
+          res,
+          user,
+          token,
+          form,
+          account ? Number(account[1]) : null,
+          Boolean(account?.[2]),
+        );
+      if (path === "/admin/roles" || role)
+        return manageRole(res, user, form, role?.[1], Boolean(role?.[2]));
       if (systemPermission) return await changeSystem(res, user, token, path, form);
       return errorPage(res, 404, "This action does not exist.", user);
     } catch (error) {
@@ -448,10 +637,15 @@ export function createAdminPanel(config, store, host = createHostActions(config.
     }
   }
 
-  return { handle, outgoingPaused: accounts.outgoingPaused, careersDay: accounts.careersDay, close() {
-    closed = true;
-    clearInterval(auditTimer);
-    host.close?.();
-    accounts.close();
-  } };
+  return {
+    handle,
+    outgoingPaused: accounts.outgoingPaused,
+    careersDay: accounts.careersDay,
+    close() {
+      closed = true;
+      clearInterval(auditTimer);
+      host.close?.();
+      accounts.close();
+    },
+  };
 }

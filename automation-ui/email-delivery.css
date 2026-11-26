@@ -1,19 +1,49 @@
-#email-view { --subtle: #64738c; --soft-line: #e9eef7; }
-.panel-heading { display: flex; align-items: center; min-width: 0; gap: 11px; }
+/* Styles for the archived per-request delivery screen. */
+#email-view {
+  --subtle: #64738c;
+  --soft-line: #e9eef7;
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 11px;
+}
 .heading-icon {
   display: grid;
   place-items: center;
   flex: none;
   width: 40px;
   height: 40px;
-  border-radius: .65rem;
+  border-radius: 0.65rem;
   color: var(--blue);
   background: #dbeeff;
 }
-.panel-heading h2 { font-size: 1.06rem; line-height: 1.3; }
-.panel-heading p { margin-top: 3px; color: var(--muted); font-size: .875rem; line-height: 1.45; }
-.icon-edit::before { inset: 3px 5px 3px 2px; border: 1.6px solid currentColor; border-radius: 3px; }
-.icon-edit::after { width: 3.4px; height: 11px; right: 3px; top: 2px; border: 1.4px solid currentColor; border-radius: 2px 2px 1px 1px; transform: rotate(40deg); background: #edf3ff; }
+.panel-heading h2 {
+  font-size: 1.06rem;
+  line-height: 1.3;
+}
+.panel-heading p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+.icon-edit::before {
+  inset: 3px 5px 3px 2px;
+  border: 1.6px solid currentColor;
+  border-radius: 3px;
+}
+.icon-edit::after {
+  width: 3.4px;
+  height: 11px;
+  right: 3px;
+  top: 2px;
+  border: 1.4px solid currentColor;
+  border-radius: 2px 2px 1px 1px;
+  transform: rotate(40deg);
+  background: #edf3ff;
+}
 
 .editor-intro {
   display: flex;
@@ -28,7 +58,11 @@
   letter-spacing: -0.048em;
   font-weight: 760;
 }
-.editor-intro p { margin-top: 8px; color: var(--muted); line-height: 1.5; }
+.editor-intro p {
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.5;
+}
 .field {
   display: grid;
   gap: 6px;
@@ -49,23 +83,55 @@
   font-size: 1rem;
   font-weight: 450;
 }
-.field input::placeholder { color: #5f6d84; }
-.field-help { margin-top: 7px; color: var(--subtle); font-size: .8125rem; line-height: 1.4; }
-.address-field { margin-top: 20px; }
+.field input::placeholder {
+  color: #5f6d84;
+}
+.field-help {
+  margin-top: 7px;
+  color: var(--subtle);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+.address-field {
+  margin-top: 20px;
+}
 
 .delivery-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr);
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
   gap: 20px;
   align-items: start;
 }
-.delivery-panel { padding: 20px; }
-#start-delivery, #delivery-reset { margin-top: 16px; }
-.delivery-request { border-top: 1px solid var(--soft-line); margin-top: 18px; padding-top: 16px; }
-.delivery-state { color: var(--navy); font-weight: 700; }
-.delivery-instructions { margin: 18px 0 14px; }
-.wrap-anywhere, .delivery-meta dd { overflow-wrap: anywhere; }
-.copy-field { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 6px 0 12px; }
+.delivery-panel {
+  padding: 20px;
+}
+#start-delivery,
+#delivery-reset {
+  margin-top: 16px;
+}
+.delivery-request {
+  border-top: 1px solid var(--soft-line);
+  margin-top: 18px;
+  padding-top: 16px;
+}
+.delivery-state {
+  color: var(--navy);
+  font-weight: 700;
+}
+.delivery-instructions {
+  margin: 18px 0 14px;
+}
+.wrap-anywhere,
+.delivery-meta dd {
+  overflow-wrap: anywhere;
+}
+.copy-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+  margin: 6px 0 12px;
+}
 .copy-field input {
   flex: 1 1 15rem;
   width: 100%;
@@ -76,12 +142,28 @@
   background: #fbfcff;
   color: var(--ink);
   font-family: ui-monospace, monospace;
-  font-size: .875rem;
+  font-size: 0.875rem;
 }
-.delivery-meta { display: grid; gap: 12px; margin: 18px 0; }
-.delivery-meta dt { color: var(--muted); font-size: .875rem; font-weight: 650; }
-.delivery-meta dd { margin-top: 3px; }
+.delivery-meta {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+}
+.delivery-meta dt {
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+.delivery-meta dd {
+  margin-top: 3px;
+}
 @media (max-width: 790px) {
-  .delivery-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .editor-intro { flex-wrap: wrap; align-items: start; }
+  .delivery-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .editor-intro {
+    flex-wrap: wrap;
+    align-items: start;
+  }
 }

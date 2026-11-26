@@ -7,7 +7,10 @@ Digest Bot formats SharePoint news digests in the Bond Staff News layout with a 
 
 Both tabs are public. Automatic replies use the original From address after a passing, domain-aligned DKIM or SPF check.
 
-[Illustrated guide to how Digest Bot works](docs/how-it-works.md) · [Opening a saved .eml in new Outlook](https://support.microsoft.com/en-us/outlook/mail/open-eml-msg-and-oft-files-in-new-outlook-and-outlook-on-the-web)
+- [How Digest Bot works](docs/how-it-works.md) shows the two workflows and the automatic delivery flow.
+- [Code map](docs/code-map.md) shows which files work together and where to make common changes.
+- [Data model](docs/data-model.md) diagrams the two SQLite databases.
+- [Opening a saved .eml in new Outlook](https://support.microsoft.com/en-us/outlook/mail/open-eml-msg-and-oft-files-in-new-outlook-and-outlook-on-the-web)
 
 ## Deploy and test
 

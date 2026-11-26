@@ -1,3 +1,5 @@
+// Small byte-level fixtures cover MIME formats used by exported Outlook mail.
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseEmail } from "../dist/core/mime.js";
@@ -27,7 +29,11 @@ test("decodes a sliced MIME message with Windows-1252 text and a folded inline i
   const prefix = Buffer.from("outside message");
   const message = Buffer.from("\xef\xbb\xbf" + body, "latin1");
   const enclosing = Buffer.concat([prefix, message, Buffer.from("outside message")]);
-  const bytes = new Uint8Array(enclosing.buffer, enclosing.byteOffset + prefix.length, message.length);
+  const bytes = new Uint8Array(
+    enclosing.buffer,
+    enclosing.byteOffset + prefix.length,
+    message.length,
+  );
 
   const email = parseEmail(bytes);
   assert.equal(email.subject, "Staff News – November");
@@ -36,6 +42,8 @@ test("decodes a sliced MIME message with Windows-1252 text and a folded inline i
 });
 
 test("reports the same readable error for malformed base64 bodies", () => {
-  const message = Buffer.from("Content-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\nZg==!");
+  const message = Buffer.from(
+    "Content-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\nZg==!",
+  );
   assert.throws(() => parseEmail(message), /Part of this email uses damaged MIME encoding/);
 });

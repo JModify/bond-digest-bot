@@ -5,6 +5,7 @@ After=docker.service network-online.target
 Wants=network-online.target
 
 [Service]
+# One invocation handles one request and returns to the path watcher.
 Type=oneshot
 EnvironmentFile=/etc/default/bond-sdc-admin
 ExecStart=/usr/bin/python3 /usr/local/libexec/bond-sdc-host-admin.py

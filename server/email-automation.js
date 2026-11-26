@@ -1,3 +1,5 @@
+// Manages the SMTP listener, queue database, SES client and delivery worker as a single service.
+
 import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createSecureContext } from "node:tls";
@@ -14,6 +16,7 @@ export function prepareEmailDelivery(config, onError) {
   mkdirSync(dirname(config.databasePath), { recursive: true, mode: 0o700 });
   const store = openStore(config.databasePath);
   chmodSync(config.databasePath, 0o600);
+  // Reconcile jobs left in progress by the last process before accepting more mail.
   store.recover();
 
   const transport = createSesTransport(config.region);
@@ -52,6 +55,7 @@ export function prepareEmailDelivery(config, onError) {
       clearInterval(tlsRefresh);
       await Promise.all([new Promise((resolve) => smtp.close(resolve)), stopWorker()]);
       transport.close();
+      // The admin panel can keep reading the queue until its current HTTP requests finish.
       await webDrained;
       store.close();
     },
