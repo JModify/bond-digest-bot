@@ -1,3 +1,5 @@
+// Connects the public page to the browser-only formatter and the group address API.
+
 import { formatDigest, readDigest } from "./core/digest.js";
 import { DEFAULT_PRESET } from "./core/preset.js";
 import { renderDigest } from "./core/render.js";
@@ -16,6 +18,8 @@ const copyAddress = byId("copy-address");
 const automaticFeedback = byId("automatic-feedback");
 const emailType = "message/rfc822";
 
+// Each selection or removal advances this counter. An older file or logo read can finish after the
+// user chooses another file.
 let requestId = 0;
 let logoRequest;
 let addressRequest;
@@ -37,7 +41,9 @@ function showFile(file, articleCount) {
   byId("drop-icon").className = "icon " + (selected ? "icon-mail" : "icon-upload");
   byId("drop-title").textContent = file?.name || "Drop your .eml file here";
   byId("file-meta").hidden = !selected;
-  byId("file-meta").textContent = selected ? `${articleCount} ${articleCount === 1 ? "article" : "articles"}` : "";
+  byId("file-meta").textContent = selected
+    ? `${articleCount} ${articleCount === 1 ? "article" : "articles"}`
+    : "";
   byId("choose-label").textContent = selected ? "Replace" : "Choose file";
   byId("remove-file").hidden = !selected;
   byId("save-help").hidden = selected;
@@ -45,6 +51,7 @@ function showFile(file, articleCount) {
   preview.hidden = !selected;
 }
 
+// A download URL holds the generated file in memory until the current result is cleared.
 function resetResult() {
   if (download.href) URL.revokeObjectURL(download.href);
   download.removeAttribute("href");
@@ -54,14 +61,21 @@ function resetResult() {
   showFile(null);
 }
 
+// Selections share one logo request. Clearing a failed request lets the next selection try again.
 function loadLogo() {
-  logoRequest ??= fetch(new URL("assets/bond-logo.png", import.meta.url)).then(async (response) => {
-    if (!response.ok) throw new Error("Couldn’t load the Staff News logo. Try again.");
-    return { kind: "inline", type: "image/png", bytes: new Uint8Array(await response.arrayBuffer()) };
-  }).catch((error) => {
-    logoRequest = undefined;
-    throw error;
-  });
+  logoRequest ??= fetch(new URL("assets/bond-logo.png", import.meta.url))
+    .then(async (response) => {
+      if (!response.ok) throw new Error("Couldn’t load the Staff News logo. Try again.");
+      return {
+        kind: "inline",
+        type: "image/png",
+        bytes: new Uint8Array(await response.arrayBuffer()),
+      };
+    })
+    .catch((error) => {
+      logoRequest = undefined;
+      throw error;
+    });
   return logoRequest;
 }
 
@@ -77,6 +91,7 @@ async function formatFile(file) {
     const logo = await loadLogo();
     if (currentRequest !== requestId) return;
 
+    // Build the preview and downloadable email from the same parsed articles and timestamp.
     const date = new Date();
     const formatted = renderDigest(digest, DEFAULT_PRESET, { date, logo, preview: true });
     const eml = formatDigest(digest, DEFAULT_PRESET, date, logo);
@@ -87,11 +102,13 @@ async function formatFile(file) {
     previewFrame.srcdoc = formatted.html;
     showFile(file, digest.articles.length);
   } catch (error) {
-    if (currentRequest === requestId) showError(error.message || "This email couldn’t be formatted.");
+    if (currentRequest === requestId)
+      showError(error.message || "This email couldn’t be formatted.");
   } finally {
     if (currentRequest === requestId) {
       setLoading(false);
-      if (download.hasAttribute("href")) fileStatus.textContent = "The formatted email is ready to download.";
+      if (download.hasAttribute("href"))
+        fileStatus.textContent = "The formatted email is ready to download.";
     }
   }
 }
@@ -106,11 +123,14 @@ function acceptFiles(files) {
   }
   requestId += 1;
   setLoading(false);
-  showError(files.length > 1
-    ? "Choose one .eml file at a time."
-    : "Choose a SharePoint digest saved as an .eml file. In new Outlook, use More actions → Save as first.");
+  showError(
+    files.length > 1
+      ? "Choose one .eml file at a time."
+      : "Choose a SharePoint digest saved as an .eml file. In new Outlook, use More actions → Save as first.",
+  );
 }
 
+// The picker and drop zone both call acceptFiles so they accept the same file types.
 chooseFile.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => {
   if (fileInput.files.length) acceptFiles(fileInput.files);
@@ -137,12 +157,14 @@ dropZone.addEventListener("drop", (event) => {
   dropZone.classList.remove("is-dragging");
   acceptFiles(event.dataTransfer.files);
 });
+// Keep a file dropped outside the target from replacing the page in the browser.
 for (const type of ["dragover", "drop"]) {
   window.addEventListener(type, (event) => {
     if (event.dataTransfer.types.includes("Files")) event.preventDefault();
   });
 }
 
+// Automatic only needs the Microsoft 365 group address. The mail itself travels through SMTP.
 async function loadGroupAddress() {
   if (groupAddress.value || addressRequest) return;
   automaticFeedback.textContent = "Loading the group address…";
@@ -160,19 +182,22 @@ async function loadGroupAddress() {
     automaticFeedback.hidden = true;
     byId("automatic-address").hidden = false;
   } catch {
-    automaticFeedback.textContent = "The group address couldn’t be loaded. Open Automatic again to retry.";
+    automaticFeedback.textContent =
+      "The group address couldn’t be loaded. Open Automatic again to retry.";
   } finally {
     addressRequest = undefined;
   }
 }
 
+// The URL fragment lets users link directly to a tab. A fresh visit opens Automatic.
 function showWorkflow() {
   const automatic = location.hash === "" || location.hash === "#automatic";
   byId("manual-view").hidden = automatic;
   byId("automatic-view").hidden = !automatic;
   byId("privacy-note").hidden = automatic;
   for (const link of document.querySelectorAll("[data-workflow]")) {
-    if (link.dataset.workflow === (automatic ? "automatic" : "manual")) link.setAttribute("aria-current", "page");
+    if (link.dataset.workflow === (automatic ? "automatic" : "manual"))
+      link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
   if (automatic) loadGroupAddress();

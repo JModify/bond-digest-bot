@@ -1,3 +1,4 @@
+# Base stack. Caddy serves the landing page and proxies Digest Bot HTTP traffic.
 name: bond-sdc
 
 services:
@@ -16,6 +17,7 @@ services:
     logging:
       driver: local
 
+  # Node serves the public page on the internal network and enables admin when configured.
   digest-bot:
     build: .
     init: true
@@ -28,6 +30,7 @@ services:
       SDC_ADMIN_DATABASE: /admin-data/admin.sqlite
       SDC_ADMIN_EC2_INSTANCE_ID: ${SDC_ADMIN_EC2_INSTANCE_ID:-}
     volumes:
+      # Keep accounts and settings when the container is rebuilt.
       - sdc-admin-data:/admin-data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]

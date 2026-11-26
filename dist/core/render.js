@@ -1,3 +1,5 @@
+// Builds fresh Staff News HTML and plain text from the extracted article data.
+
 import { toBase64 } from "./mime.js";
 import { formatSubject, normalisePreset } from "./preset.js";
 
@@ -10,6 +12,8 @@ const imageCache = new WeakMap();
 const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const escape = (text) => String(text).replace(/[&<>"']/g, (character) => entities[character]);
 
+// Preview images use data URLs. The exported email gets Content-IDs and one attachment per image
+// byte array.
 function imageSource(image, context, label = "article") {
   if (!image) return "";
   if (image.kind === "remote") return context.preview ? "" : image.url;
@@ -25,6 +29,8 @@ function imageSource(image, context, label = "article") {
   return "cid:" + context.attachments.get(bytes).id;
 }
 
+// Show link labels as plain text in the sandboxed preview. Keep article links active in the
+// exported email.
 function link(href, label, style, preview) {
   if (preview) return `<span style="${style}">${escape(label)}</span>`;
   return `<a href="${escape(href)}" style="${style}">${escape(label)}</a>`;
@@ -46,7 +52,12 @@ function renderThumbnail(article, context) {
 }
 
 function renderArticle(article, context) {
-  const articleTitle = link(article.href, article.title, "color:#333;text-decoration:none;", context.preview);
+  const articleTitle = link(
+    article.href,
+    article.title,
+    "color:#333;text-decoration:none;",
+    context.preview,
+  );
   const image = renderThumbnail(article, context);
   const summary = escape(article.summary ?? "").replace(/\r?\n/g, "<br>");
   const html = `
@@ -60,12 +71,21 @@ function renderArticle(article, context) {
         ${article.views ? `<p style="margin:10px 0 0;font-size:10px;line-height:1.4;color:#a6a6a6;">${escape(article.views)}</p>` : ""}
       </td>
     </tr>`;
-  const text = [article.title, article.href, article.summary, article.author, article.date, article.views]
-    .filter(Boolean).join("\n");
+  const text = [
+    article.title,
+    article.href,
+    article.summary,
+    article.author,
+    article.date,
+    article.views,
+  ]
+    .filter(Boolean)
+    .join("\n");
   return { html, text };
 }
 
-const divider = '<tr><td colspan="2" style="border-top:1px solid #d6d6d6;font-size:0;line-height:1px;height:1px;">&nbsp;</td></tr>';
+const divider =
+  '<tr><td colspan="2" style="border-top:1px solid #d6d6d6;font-size:0;line-height:1px;height:1px;">&nbsp;</td></tr>';
 
 export function renderDigest(digest, input, { date = new Date(), logo, preview = false } = {}) {
   const preset = normalisePreset(input);
@@ -75,6 +95,8 @@ export function renderDigest(digest, input, { date = new Date(), logo, preview =
   const headerLogo = renderLogo(logo, context);
   const articles = digest.articles.map((article) => renderArticle(article, context));
 
+  // Email clients apply CSS unevenly. The table layout, inline styles and Outlook conditional
+  // markup are part of the email template.
   const html = `<!doctype html>
 <html lang="en-AU">
 <head>

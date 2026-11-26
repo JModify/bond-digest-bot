@@ -5,6 +5,7 @@
 }
 
 bond-sdc.com {
+	# Admin is served by Digest Bot under the landing site's hostname.
 	@admin path /admin /admin/*
 	handle @admin {
 		request_body {
@@ -25,6 +26,7 @@ www.bond-sdc.com {
 }
 
 digest.bond-sdc.com {
+	# Keep admin routes on the dedicated origin above.
 	@admin path /admin /admin/*
 	respond @admin 404
 	request_body {

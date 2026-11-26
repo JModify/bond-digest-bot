@@ -1,3 +1,5 @@
+// Formats queued digests and submits raw email to SES. Also handles admin resends from the archive.
+
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { SendEmailCommand, SESv2Client } from "@aws-sdk/client-sesv2";
@@ -18,11 +20,14 @@ export function createSesTransport(region) {
   const client = new SESv2Client({ region, maxAttempts: 1 });
   return {
     send({ from, recipient, raw }) {
-      return client.send(new SendEmailCommand({
-        FromEmailAddress: from,
-        Destination: { ToAddresses: [recipient] },
-        Content: { Raw: { Data: raw } },
-      }), { abortSignal: AbortSignal.timeout(sesTimeoutMs) });
+      return client.send(
+        new SendEmailCommand({
+          FromEmailAddress: from,
+          Destination: { ToAddresses: [recipient] },
+          Content: { Raw: { Data: raw } },
+        }),
+        { abortSignal: AbortSignal.timeout(sesTimeoutMs) },
+      );
     },
     close() {
       client.destroy();
@@ -30,24 +35,38 @@ export function createSesTransport(region) {
   };
 }
 
+// Check the ultimate URL when Microsoft Safe Links wraps a SharePoint link.
 function isAllowedSharePointUrl(url, hosts) {
   const { hostname, protocol } = new URL(linkDestination(url));
   if (protocol !== "https:") return false;
   return hosts.length ? hosts.includes(hostname) : hostname.endsWith(".sharepoint.com");
 }
 
+// An admin resend replaces address and message routing headers while preserving the archived MIME
+// body and attachments.
 export function retargetDigest(raw, from, recipient) {
   const separator = raw.indexOf("\r\n\r\n");
   if (separator === -1) throw new Error("The archived email is missing its MIME headers");
-  const headers = raw.subarray(0, separator).toString("latin1").split(/\r\n(?=[^ \t])/);
-  const preserved = headers.filter((header) => !/^(?:from|to|cc|bcc|message-id|resent-[^:]+):/i.test(header));
-  return Buffer.concat([Buffer.from([...preserved, `From: ${from}`, `To: ${recipient}`].join("\r\n"), "latin1"), raw.subarray(separator)]);
+  const headers = raw
+    .subarray(0, separator)
+    .toString("latin1")
+    .split(/\r\n(?=[^ \t])/);
+  const preserved = headers.filter(
+    (header) => !/^(?:from|to|cc|bcc|message-id|resent-[^:]+):/i.test(header),
+  );
+  return Buffer.concat([
+    Buffer.from([...preserved, `From: ${from}`, `To: ${recipient}`].join("\r\n"), "latin1"),
+    raw.subarray(separator),
+  ]);
 }
 
-export function startDeliveryWorker(config, store, transport, log = console, {
-  outgoingPaused = () => false,
-  careersDay = () => defaultCareersDay,
-} = {}) {
+export function startDeliveryWorker(
+  config,
+  store,
+  transport,
+  log = console,
+  { outgoingPaused = () => false, careersDay = () => defaultCareersDay } = {},
+) {
   // JSDOM gets no script execution or external resource loader.
   const { window } = new JSDOM("");
   const logo = {
@@ -59,30 +78,46 @@ export function startDeliveryWorker(config, store, transport, log = console, {
   let running;
   let nextPrune = 0;
 
+  // Resends use the original archive. Throttled attempts reuse the same formatted bytes when
+  // available. New digests use the shared formatter.
   function prepare(job) {
     try {
       if (job.originalId) {
-        return { raw: retargetDigest(store.history.readArchived(job.originalId), from, job.recipient) };
+        return {
+          raw: retargetDigest(store.history.readArchived(job.originalId), from, job.recipient),
+        };
       }
       if (job.attempts) {
         const archived = store.history.readArchived(job.historyId);
         if (archived) return { raw: archived };
       }
       const digest = readDigest(job.raw, window.document, { inferRecipient: false });
-      if (!digest.articles.every((article) => isAllowedSharePointUrl(article.href, sharepointHosts))) {
-        return { reason: "source_host", detail: "The digest contained an unsupported SharePoint news link." };
+      if (
+        !digest.articles.every((article) => isAllowedSharePointUrl(article.href, sharepointHosts))
+      ) {
+        return {
+          reason: "source_host",
+          detail: "The digest contained an unsupported SharePoint news link.",
+        };
       }
-      if (digest.siteUrl && !isAllowedSharePointUrl(digest.siteUrl, sharepointHosts)) digest.siteUrl = "";
+      if (digest.siteUrl && !isAllowedSharePointUrl(digest.siteUrl, sharepointHosts))
+        digest.siteUrl = "";
       for (const article of digest.articles) {
-        // Do not turn an incoming external image URL into a tracking request.
-        if (article.image?.kind === "remote" && !isAllowedSharePointUrl(article.image.url, sharepointHosts)) {
+        // Keep remote images that belong to an allowed SharePoint host.
+        if (
+          article.image?.kind === "remote" &&
+          !isAllowedSharePointUrl(article.image.url, sharepointHosts)
+        ) {
           article.image = null;
         }
       }
       const preset = { from, subject: job.subject, recipient: job.recipient };
       const date = new Date();
       digest.articles = appendCareersArticle(digest.articles, date, careersDay());
-      return { raw: Buffer.from(formatDigest(digest, preset, date, logo, { automatic: true })), archive: true };
+      return {
+        raw: Buffer.from(formatDigest(digest, preset, date, logo, { automatic: true })),
+        archive: true,
+      };
     } catch {
       return job.originalId
         ? { reason: "archive", detail: "The archived digest could not be read." }
@@ -101,8 +136,12 @@ export function startDeliveryWorker(config, store, transport, log = console, {
     }
 
     const formatMs = Math.round(performance.now() - formatStartedAt);
-    store.sending(job.id, { raw: archive ? raw : undefined, subject: archive ? readEmailSubject(raw) : undefined,
-      detail: `Submitting to Amazon SES. Queue: ${queueMs} ms. Preparation: ${formatMs} ms.` });
+    // Record the formatted archive and sending state before giving the raw message to SES.
+    store.sending(job.id, {
+      raw: archive ? raw : undefined,
+      subject: archive ? readEmailSubject(raw) : undefined,
+      detail: `Submitting to Amazon SES. Queue: ${queueMs} ms. Preparation: ${formatMs} ms.`,
+    });
     const sesStartedAt = performance.now();
     let response;
     try {
@@ -112,19 +151,36 @@ export function startDeliveryWorker(config, store, transport, log = console, {
       const status = error.$metadata?.httpStatusCode;
       const name = /^[a-z0-9_.-]{1,80}$/i.test(error.name ?? "") ? error.name : "Request error";
       const detail = `${name}${status ? ` (HTTP ${status})` : ""} after ${sesMs} ms.`;
+      // Only explicit throttling is retried here. A response that leaves acceptance unknown becomes
+      // uncertain.
       if (status === 429 && job.attempts < maxThrottleRetries) {
         store.retry(job.id, retryDelayMs * (job.attempts + 1), Date.now(), detail);
       } else if (status >= 400 && status < 500 && status !== 408) {
-        store.finish(job.id, "failed", status === 429 ? "provider_limit" : "provider_rejected", { detail });
+        store.finish(job.id, "failed", status === 429 ? "provider_limit" : "provider_rejected", {
+          detail,
+        });
       } else {
         store.finish(job.id, "uncertain", "unconfirmed", { detail });
       }
-      log.warn("Digest delivery returned an error", { status: status ?? "unconfirmed", queueMs, formatMs, sesMs });
+      log.warn("Digest delivery returned an error", {
+        status: status ?? "unconfirmed",
+        queueMs,
+        formatMs,
+        sesMs,
+      });
       return;
     }
     const sesMs = Math.round(performance.now() - sesStartedAt);
-    store.finish(job.id, "sent", null, { detail: `Amazon SES accepted the email after ${sesMs} ms.`, messageId: response?.MessageId });
-    log.info("Formatted digest accepted by SES", { queueMs, formatMs, sesMs, messageId: response?.MessageId });
+    store.finish(job.id, "sent", null, {
+      detail: `Amazon SES accepted the email after ${sesMs} ms.`,
+      messageId: response?.MessageId,
+    });
+    log.info("Formatted digest accepted by SES", {
+      queueMs,
+      formatMs,
+      sesMs,
+      messageId: response?.MessageId,
+    });
   }
 
   async function tick() {
@@ -133,20 +189,26 @@ export function startDeliveryWorker(config, store, transport, log = console, {
       store.prune(now);
       nextPrune = now + pruneIntervalMs;
     }
+    // Freezing delivery stops new claims. SMTP intake and an already-running send can continue.
     if (outgoingPaused()) return;
     const job = store.claim(now);
     if (job) await deliver(job);
   }
 
+  // Keep at most one poll or send in progress, even if a request lasts longer than an interval.
   const interval = setInterval(() => {
     if (running) return;
-    running = tick().catch(() => {
-      // Any stale processing/sending state is reconciled on the next service start.
-      log.error("Digest worker could not update its queue");
-      process.exitCode = 1;
-      clearInterval(interval);
-      config.onWorkerError?.();
-    }).finally(() => { running = undefined; });
+    running = tick()
+      .catch(() => {
+        // Any stale processing/sending state is reconciled on the next service start.
+        log.error("Digest worker could not update its queue");
+        process.exitCode = 1;
+        clearInterval(interval);
+        config.onWorkerError?.();
+      })
+      .finally(() => {
+        running = undefined;
+      });
   }, queuePollIntervalMs);
 
   return async () => {

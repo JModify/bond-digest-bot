@@ -1,3 +1,6 @@
+// Historical per-request delivery UI kept for reference. The current public page uses a static
+// Microsoft 365 group address.
+
 const storageKey = "digest-bot.active-delivery";
 const inProgress = new Set(["waiting", "queued", "processing", "sending"]);
 const statusText = {
@@ -14,7 +17,8 @@ const failures = {
   format: "The email could not be read as a SharePoint news digest.",
   source_host: "The digest contains news links outside the configured SharePoint site.",
   provider_limit: "Amazon SES was still rate-limiting delivery after retries.",
-  provider_rejected: "Amazon SES rejected delivery. Check the sender identity, permissions and sandbox status.",
+  provider_rejected:
+    "Amazon SES rejected delivery. Check the sender identity, permissions and sandbox status.",
 };
 const localDate = new Intl.DateTimeFormat("en-AU", {
   timeZone: "Australia/Brisbane",
@@ -23,6 +27,7 @@ const localDate = new Intl.DateTimeFormat("en-AU", {
 });
 const byId = (id) => document.getElementById(id);
 
+// Restore the tab's latest delivery request after a refresh if both keys have the expected format.
 function restoreRequest() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(storageKey));
@@ -33,6 +38,7 @@ function restoreRequest() {
   return null;
 }
 
+// Mounts the older request-and-poll workflow against its original form and API.
 export function mountEmailDelivery(getPreset, announce) {
   const form = byId("delivery-form");
   const recipient = byId("delivery-recipient");
@@ -68,7 +74,11 @@ export function mountEmailDelivery(getPreset, announce) {
   function setJob(value) {
     job = value;
     try {
-      if (job) sessionStorage.setItem(storageKey, JSON.stringify({ id: job.id, statusKey: job.statusKey }));
+      if (job)
+        sessionStorage.setItem(
+          storageKey,
+          JSON.stringify({ id: job.id, statusKey: job.statusKey }),
+        );
       else sessionStorage.removeItem(storageKey);
     } catch {
       // The status remains in memory.
@@ -84,7 +94,10 @@ export function mountEmailDelivery(getPreset, announce) {
     const waiting = state === "waiting";
     byId("delivery-sharepoint").hidden = !waiting;
     byId("delivery-reset").hidden = !state || inProgress.has(state);
-    const label = state === "failed" ? (failures[job.reason] || "The digest could not be sent.") : statusText[state];
+    const label =
+      state === "failed"
+        ? failures[job.reason] || "The digest could not be sent."
+        : statusText[state];
     if (byId("delivery-state").textContent !== (label ?? "Checking request status…")) {
       byId("delivery-state").textContent = label ?? "Checking request status…";
     }
@@ -92,12 +105,14 @@ export function mountEmailDelivery(getPreset, announce) {
     if (waiting) {
       byId("delivery-inbox").value = job.inbox;
       byId("delivery-code").value = job.titleCode;
-      byId("delivery-expiry").textContent = "This address expires at " + localDate.format(job.expiresAt) + " Brisbane time.";
+      byId("delivery-expiry").textContent =
+        "This address expires at " + localDate.format(job.expiresAt) + " Brisbane time.";
     }
   }
 
   async function poll() {
-    if (!active || !enabled || !job || statusRequest || (job.state && !inProgress.has(job.state))) return;
+    if (!active || !enabled || !job || statusRequest || (job.state && !inProgress.has(job.state)))
+      return;
     const { id, statusKey } = job;
     statusRequest = api("/requests/" + id, { headers: { "X-Digest-Status": statusKey } });
     try {
@@ -115,7 +130,8 @@ export function mountEmailDelivery(getPreset, announce) {
       showError(cause.message || "Could not refresh the request status.");
     } finally {
       statusRequest = undefined;
-      if (active && job && (!job.state || inProgress.has(job.state))) timer = setTimeout(poll, 3000);
+      if (active && job && (!job.state || inProgress.has(job.state)))
+        timer = setTimeout(poll, 3000);
     }
   }
 
@@ -182,7 +198,8 @@ export function mountEmailDelivery(getPreset, announce) {
         show();
         poll();
       } catch {
-        availability.textContent = "Email delivery is unavailable here. You can upload an .eml in Workspace.";
+        availability.textContent =
+          "Email delivery is unavailable here. You can upload an .eml in Workspace.";
       }
     },
   };

@@ -1,3 +1,5 @@
+// Reads and writes the wire format of an .eml file for both the browser and Node.js.
+
 import { mailboxFromHeader, normaliseAddress } from "./mailbox.js";
 
 // Keep MIME bytes intact until each part's character encoding is known.
@@ -5,6 +7,7 @@ const utf8 = new TextEncoder();
 const crlf = "\r\n";
 const byteChunkSize = 8192;
 
+// Preserve a typed array's offset and length so a sliced message reads only its own bytes.
 function nodeBufferView(bytes) {
   if (typeof Buffer === "undefined") return null;
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -27,6 +30,8 @@ function readByteString(value) {
   return bytes;
 }
 
+// Use the platform's native encoder where available. The browser fallback receives a
+// one-character-per-byte string.
 export function toBase64(bytes) {
   if (typeof bytes.toBase64 === "function") return bytes.toBase64();
   const buffer = nodeBufferView(bytes);
@@ -56,7 +61,10 @@ function contentType(value = "text/plain") {
   const parameters = {};
   for (const field of fields) {
     const index = field.indexOf("=");
-    if (index > 0) parameters[field.slice(0, index).trim().toLowerCase()] = unquote(field.slice(index + 1).trim());
+    if (index > 0)
+      parameters[field.slice(0, index).trim().toLowerCase()] = unquote(
+        field.slice(index + 1).trim(),
+      );
   }
   return { name: name?.trim().toLowerCase(), parameters };
 }
@@ -92,10 +100,14 @@ function readBody(value, encoding) {
 
 function decodeHeader(value = "") {
   // RFC 2047 ignores whitespace between adjacent encoded words.
-  return value.replace(/(\?=)[ \t]+(?==\?)/g, "$1")
+  return value
+    .replace(/(\?=)[ \t]+(?==\?)/g, "$1")
     .replace(/=\?([^?]+)\?([bq])\?([^?]*)\?=/gi, (word, charset, encoding, body) => {
       try {
-        const bytes = encoding.toLowerCase() === "b" ? fromBase64(body) : quotedPrintable(body.replace(/_/g, " "));
+        const bytes =
+          encoding.toLowerCase() === "b"
+            ? fromBase64(body)
+            : quotedPrintable(body.replace(/_/g, " "));
         return decodeText(bytes, charset);
       } catch {
         return word;
@@ -117,10 +129,14 @@ function readHeaders(raw) {
 function readEntity(raw) {
   const separator = /\r?\n\r?\n/.exec(raw);
   return separator
-    ? { headers: readHeaders(raw.slice(0, separator.index)), body: raw.slice(separator.index + separator[0].length) }
+    ? {
+        headers: readHeaders(raw.slice(0, separator.index)),
+        body: raw.slice(separator.index + separator[0].length),
+      }
     : { headers: new Map(), body: raw };
 }
 
+// Boundaries occupy complete lines. A closing boundary ends the multipart body before any epilogue.
 function multipartChildren(body, boundary) {
   const escaped = boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const delimiter = new RegExp(`(?:^|\\r?\\n)--${escaped}(--)?[ \\t]*(?:\\r?\\n|$)`, "g");
@@ -135,6 +151,8 @@ function multipartChildren(body, boundary) {
   return children;
 }
 
+// Match an HTML cid: URL to its MIME Content-ID header despite brackets, escapes or case
+// differences.
 export function normaliseContentId(value = "") {
   const bare = value.trim().replace(/^cid:/i, "").replace(/^<|>$/g, "");
   try {
@@ -144,14 +162,23 @@ export function normaliseContentId(value = "") {
   }
 }
 
-const allowedImageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
+const allowedImageTypes = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+]);
 
+// Walk nested MIME sections and collect the first HTML and plain-text bodies plus supported inline
+// images.
 function readParts(entity, result, depth = 0) {
   if (depth > 50) throw new Error("This email is nested too deeply to read.");
   const { headers, body } = entity;
   const { name, parameters } = contentType(headers.get("content-type"));
   if (name?.startsWith("multipart/") && parameters.boundary) {
-    for (const part of multipartChildren(body, parameters.boundary)) readParts(readEntity(part), result, depth + 1);
+    for (const part of multipartChildren(body, parameters.boundary))
+      readParts(readEntity(part), result, depth + 1);
     return;
   }
 
@@ -183,13 +210,17 @@ function readSubject(headers) {
   return decodeHeader(utf8Subject.includes("�") ? decodeText(bytes, "windows-1252") : utf8Subject);
 }
 
+// SMTP intake reads a preview of the header area for history. The worker parses the full email
+// later.
 export function readEmailSubject(bytes) {
   return readSubject(readEntity(rawText(bytes.subarray(0, 128 * 1024))).headers);
 }
 
+// Decode headers and body parts into fields the SharePoint extractor can inspect.
 export function parseEmail(bytes) {
   const entity = readEntity(rawText(bytes));
-  if (!entity.headers.size) throw new Error("This file doesn’t look like an email. Choose a SharePoint .eml file.");
+  if (!entity.headers.size)
+    throw new Error("This file doesn’t look like an email. Choose a SharePoint .eml file.");
   const result = {
     subject: readSubject(entity.headers),
     from: mailboxFromHeader(entity.headers.get("from")),
@@ -202,7 +233,8 @@ export function parseEmail(bytes) {
   try {
     readParts(entity, result);
   } catch (error) {
-    if (error.name === "InvalidCharacterError") throw new Error("Part of this email uses damaged MIME encoding.");
+    if (error.name === "InvalidCharacterError")
+      throw new Error("Part of this email uses damaged MIME encoding.");
     throw error;
   }
   return result;
@@ -241,7 +273,13 @@ function emailPart(type, bytes, extra = []) {
   ].join(crlf);
 }
 
-export function serializeEmail({ subject, from, recipient, html, text, images }, date = new Date(), { editable = false, automatic = false } = {}) {
+// The text and HTML versions form one multipart/alternative body. With images, multipart/related
+// wraps that body and its CID attachments.
+export function serializeEmail(
+  { subject, from, recipient, html, text, images },
+  date = new Date(),
+  { editable = false, automatic = false } = {},
+) {
   const id = crypto.randomUUID();
   const alternative = "alt-" + id;
   const related = "rel-" + id;
@@ -258,9 +296,14 @@ export function serializeEmail({ subject, from, recipient, html, text, images },
   if (toAddress) lines.push("To: " + toAddress);
   // Opening a draft lets the mail client apply its compose settings.
   if (editable) lines.push("X-Unsent: 1");
+  // Mark server replies as automatic so mail systems can suppress replies to them.
   if (automatic) lines.push("Auto-Submitted: auto-replied", "X-Auto-Response-Suppress: All");
   if (hasImages) {
-    lines.push(`Content-Type: multipart/related; type="multipart/alternative"; boundary="${related}"`, "", boundary(related));
+    lines.push(
+      `Content-Type: multipart/related; type="multipart/alternative"; boundary="${related}"`,
+      "",
+      boundary(related),
+    );
   }
   lines.push(
     `Content-Type: multipart/alternative; boundary="${alternative}"`,
@@ -274,7 +317,10 @@ export function serializeEmail({ subject, from, recipient, html, text, images },
 
   if (hasImages) {
     for (const { id: imageId, type, bytes } of images) {
-      lines.push(boundary(related), emailPart(type, bytes, [`Content-ID: <${imageId}>`, "Content-Disposition: inline"]));
+      lines.push(
+        boundary(related),
+        emailPart(type, bytes, [`Content-ID: <${imageId}>`, "Content-Disposition: inline"]),
+      );
     }
     lines.push(boundary(related, true));
   }

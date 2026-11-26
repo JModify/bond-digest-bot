@@ -2,6 +2,7 @@
 Description=Watch for a Service Desk Central maintenance request
 
 [Path]
+# The container publishes this file when a maintenance action is queued.
 PathExists=/var/lib/bond-sdc-admin/requests/request.json
 Unit=bond-sdc-admin.service
 
