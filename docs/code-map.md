@@ -18,7 +18,7 @@ Start with [How Digest Bot works](how-it-works.md) for the two user workflows. U
 
 ## Public page and shared formatter
 
-The browser runs **Manual** from [app.js](../dist/app.js). It reads the selected file, shows a sandboxed preview and creates the download. **Automatic** fetches the group address through [http.js](../server/http.js). The email for that flow arrives separately at the SMTP listener.
+The browser runs **Manual** from [app.js](../dist/app.js). It reads the selected file, shows a sandboxed preview and creates the download. **Automatic** fetches the group address through [http.js](../server/http.js) in both processing modes. In **Server** mode, the email arrives separately at the SMTP listener.
 
 ```mermaid
 flowchart TD
@@ -75,7 +75,7 @@ flowchart TD
 | [bootstrap.js](../server/admin/bootstrap.js) | EC2 terminal command that provisions the owner account or resets its password. |
 | [notice.js](../server/admin/notice.js) | Clears a confirmation notice from the URL after a form submission. |
 | [host.js](../server/admin/host.js) | Writes one maintenance request, reads host status and handles EC2 reboot through the AWS API. |
-| [host-admin.py](../deploy/admin/host-admin.py) | EC2 host process that validates requests, manages the approved `.env` settings and runs Git and Compose for site maintenance. |
+| [host-admin.py](../deploy/admin/host-admin.py) | EC2 host process that validates requests, saves the approved `.env` settings and selects the Compose files for the saved processing method. |
 | [install-updater.sh](../deploy/admin/install-updater.sh), [path unit](../deploy/admin/bond-sdc-admin.path) and [service unit](../deploy/admin/bond-sdc-admin.service) | Install and run the optional systemd watcher for maintenance requests. |
 
 ## Deployment and tests

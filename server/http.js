@@ -37,7 +37,7 @@ export function createWebServer(config, log = console, admin) {
     }
     if (path === "/healthz" && isRead) return json(res, 200, { ok: true });
     // Expose just the address the Automatic tab needs to show.
-    if (path === "/api/email" && isRead && config.emailDeliveryEnabled) {
+    if (path === "/api/email" && isRead && config.groupAddress) {
       return json(res, 200, { groupAddress: config.groupAddress });
     }
     const file = path === "/" ? "/index.html" : path;

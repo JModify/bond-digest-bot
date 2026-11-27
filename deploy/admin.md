@@ -4,7 +4,7 @@ Open **Admin** on Service Desk Central to review Digest Bot mail, manage panel a
 
 ## Enable the panel on EC2
 
-These commands use the existing `~/bond-sdc/bond-digest-bot` deployment and its sibling `bond-service-desk-central` checkout. Run them after both repositories contain the v1.1.0 changes.
+These commands use the existing `~/bond-sdc/bond-digest-bot` deployment and its sibling `bond-service-desk-central` checkout.
 
 ```bash
 cd ~/bond-sdc/bond-digest-bot
@@ -15,21 +15,45 @@ sudo nano .env
 
 Add `SDC_ADMIN_ENABLED=true` to the existing `.env`. If the name is already present, edit that entry. Leave the existing certificate contact and Microsoft 365 group values in place.
 
-The host updater adds the **Pull latest and restart sites**, **Rebuild current code** and `.env` controls. Install it once on EC2 before starting Compose with its override.
+The host updater adds the **Pull latest and restart sites**, **Rebuild current code** and `.env` controls. Install it on EC2 before starting Compose with its override. These commands start the panel in **Other** mode. Use `DIGEST_PROCESSING_METHOD=other` in `.env`.
 
 ```bash
-sudo sh deploy/admin/install-updater.sh
-sudo docker compose -f compose.yaml -f compose.delivery.yaml -f compose.updater.yaml up -d --build --force-recreate --wait --wait-timeout 420
-sudo docker compose -f compose.yaml -f compose.delivery.yaml -f compose.updater.yaml exec -T digest-bot node server/admin/bootstrap.js
+sudo sh deploy/admin/install-updater.sh manual
+sudo docker compose -f compose.yaml -f compose.updater.yaml up -d --build --force-recreate --wait
+sudo docker compose exec -T digest-bot node server/admin/bootstrap.js
 ```
 
 The final command prints the generated password to that terminal. Sign in at [bond-sdc.com/admin](https://bond-sdc.com/admin), then change it in **Account** or save it in your password manager. To recover access, run the same command with `--reset` after `bootstrap.js`. It issues a new password and revokes the owner's existing sessions.
 
-For a panel without host maintenance, skip the installer and use `-f compose.yaml -f compose.delivery.yaml` in both Docker commands. For a manual-only installation, use `install-updater.sh manual` and omit `-f compose.delivery.yaml` from the Docker commands.
+For a panel without host maintenance, omit the installer and `compose.updater.yaml`. For **Server** mode, set `DIGEST_PROCESSING_METHOD=server`, use `install-updater.sh automatic` and include `-f compose.delivery.yaml` in the Compose startup command. [Server mode prerequisites](email-delivery.md)
+
+## Switch the Processing Method
+
+| Method | What runs on EC2 |
+| --- | --- |
+| **Server** | The public site, SMTP on port 25, the mail queue, Email History and replies through Amazon SES. |
+| **Other** | The public site and admin panel. **Automatic** still shows the group address and **Manual** still formats `.eml` files in the browser. The mail queue, SMTP listener and SES client stay off. |
+
+### Upgrade and start directly in Other
+
+For an existing admin deployment without a `DIGEST_PROCESSING_METHOD` setting, this one-time command updates the host updater and rebuilds the sites in **Other** mode. Before running it, confirm the group’s new workflow can return a test digest. Have the group owner remove any forwarding or external member that sends a copy to `digest@inbox.bond-sdc.com` when you cut over.
+
+```bash
+cd ~/bond-sdc/bond-digest-bot && git pull --ff-only origin main && sudo -n sh deploy/admin/install-updater.sh manual && sudo -n docker compose -f compose.yaml -f compose.updater.yaml up -d --build --force-recreate --wait
+```
+
+The installer's `manual` argument sets the fallback to **Other**. The saved **Processing Method** takes precedence once you choose it in Admin.
+
+### Change the method in Admin
+
+1. In [Admin](https://bond-sdc.com/admin), open **System → Environment settings**. Choose **Server** or **Other** under **Processing Method**. Keep **Microsoft 365 digest group** set to the address users enter in SharePoint. Select **Save .env**.
+2. Refresh until the setting shows as saved. Under **Site updates**, select **Rebuild current code**. After the sites restart, **System → Digest Bot** shows the active method. Open the public site and check **Automatic** and **Manual**.
+
+The rebuild removes the SMTP port mapping in **Other** mode. The previous mail queue and archive stay on disk and are available again in **Server** mode. Restoring **Server** also requires its mail certificate, SES permissions and incoming mail routing. [Server mode setup](email-delivery.md)
 
 ## Read the email history
 
-Select an ID in **Email History** to open its timeline. **Subject** shows the subject of the formatted email once available. The incoming subject appears in the record details. Use the status filter and page links to find earlier entries. Times appear in Brisbane time.
+In **Server** mode, select an ID in **Email History** to open its timeline. **Subject** shows the subject of the formatted email once available. The incoming subject appears in the record details. Use the status filter and page links to find earlier entries. Times appear in Brisbane time.
 
 | Status | What happened |
 | --- | --- |
@@ -57,14 +81,14 @@ Owner has every permission. People with **Role management** can edit roles and g
 - **Freeze** lets the active send finish and holds remaining jobs. Incoming SMTP can still queue mail while space is available. **Resume** starts processing the queue again.
 - **Careers at Bond** appends the article to automatic Staff News emails formatted on the selected day in Brisbane time. Wednesday is the default. **Save schedule** takes effect for newly formatted digests and records the change in **Admin Activity**. Use **Manage Careers at Bond schedule** in **Roles** to grant access.
 - **Pull latest and restart sites** fetches and fast-forwards both `main` checkouts, builds both images and waits for Compose startup checks. It stops if a checkout has tracked changes, uses a different remote or cannot fast-forward.
-- **Save .env** updates the certificate contact, digest group address and reboot instance ID. The host validates the resulting Compose configuration before replacing the file. **Rebuild current code** applies the saved values from your existing checkouts.
-- **Reload values from EC2** refreshes the three fields after an edit in the terminal.
+- **Save .env** updates the processing method, certificate contact, digest group address and reboot instance ID. The host validates the resulting Compose configuration before replacing the file. **Rebuild current code** applies the saved values from your existing checkouts.
+- **Reload values from EC2** refreshes the fields after an edit in the terminal.
 
 Check **Admin Activity** under **System** for the latest 20 events. Site updates and rebuilds log the request and its final result, including failure details. For more detail on a failed request, inspect `sudo journalctl -u bond-sdc-admin.service -n 60 --no-pager`. If the host updater itself changes in a later release, rerun its installer from the new checkout.
 
 If the updater reports local changes, use `git status --short --untracked-files=no` in the named checkout. Review those changes and preserve any deployment settings before cleaning the checkout and retrying. The updater checks both repositories before advancing either checkout or rebuilding the services.
 
-The panel submits fixed requests to a host `systemd` service. The container can write a request and read its result. The host holds the Docker access and only shares the three editable settings with the panel.
+The panel submits fixed requests to a host `systemd` service. The container can write a request and read its result. The host holds the Docker access and shares the four editable settings with the panel.
 
 ## Enable EC2 reboot
 
@@ -75,7 +99,7 @@ The panel submits fixed requests to a host `systemd` service. The container can 
 If the setup message still appears, check the running container from the Digest Bot checkout. This prints only the instance ID, or `(unset)`.
 
 ```bash
-sudo docker compose -f compose.yaml -f compose.delivery.yaml -f compose.updater.yaml exec -T digest-bot \
+sudo docker compose exec -T digest-bot \
   node -p 'process.env.SDC_ADMIN_EC2_INSTANCE_ID?.trim() || "(unset)"'
 ```
 

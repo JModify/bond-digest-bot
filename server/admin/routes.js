@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { normaliseAddress } from "../../dist/core/mailbox.js";
 import { weekdays } from "../careers.js";
+import { processingMethodLabels } from "../config.js";
 import {
   checkPassword,
   hashPassword,
@@ -91,7 +92,12 @@ const mailId = (value) => (value.startsWith("D-") ? value : Number(value));
 const canManageUser = (user, account) =>
   account && canManageRole(user, { id: account.role, permissions: account.permissions });
 
-function readSettingsForm(form, automatic) {
+function readSettingsForm(form, activeMethod) {
+  const method = form.get("DIGEST_PROCESSING_METHOD");
+  if (method !== null && !Object.hasOwn(processingMethodLabels, method)) {
+    throw new FormError(400, "Choose Server or Other for Processing Method.");
+  }
+  const automatic = (method ?? activeMethod) === "server";
   const values = Object.fromEntries(
     Object.keys(settingsFields).map((key) => [key, form.get(key)?.trim() ?? ""]),
   );
@@ -104,6 +110,7 @@ function readSettingsForm(form, automatic) {
   ) {
     throw new FormError(400, "Check the email addresses and EC2 instance ID.");
   }
+  if (method !== null) values.DIGEST_PROCESSING_METHOD = method;
   return values;
 }
 
@@ -390,7 +397,9 @@ export function createAdminPanel(config, store, host = createHostActions(config.
         );
       }
       const payload =
-        kind === "settings" ? { kind, values: readSettingsForm(form, Boolean(store)) } : { kind };
+        kind === "settings"
+          ? { kind, values: readSettingsForm(form, config.processingMethod) }
+          : { kind };
       const siteUpdate = kind === "update" || kind === "restart";
       const pending = siteUpdate
         ? accounts.startSiteUpdate(user.username, kind, status.updatedAt)
@@ -510,8 +519,9 @@ export function createAdminPanel(config, store, host = createHostActions(config.
         systemPage(
           user,
           {
+            processingMethod: config.processingMethod,
             pending: store?.pending(),
-            paused: accounts.outgoingPaused(),
+            paused: store && accounts.outgoingPaused(),
             careersDay: can(user, "careers_schedule") ? accounts.careersDay() : undefined,
             activity: can(user, "activity") ? accounts.activity() : [],
             update,

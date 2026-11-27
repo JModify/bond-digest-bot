@@ -1,8 +1,8 @@
 # How Digest Bot works
 
-Digest Bot takes a SharePoint news digest and rebuilds it in the Staff News layout. It uses the same JavaScript formatter whether you download an Outlook file or receive an automatic reply. **Automatic** opens first. Select **Manual** when you have a saved `.eml` file.
+Digest Bot takes a SharePoint news digest and rebuilds it in the Staff News layout. **Automatic** opens first and shows the group address. Select **Manual** when you have a saved `.eml` file. In **Server** mode, EC2 uses the same JavaScript formatter for automatic replies as the browser uses for downloads.
 
-![Two Digest Bot workflows. Manual opens an Outlook file, formats it in the browser and downloads a new file. Automatic sends a SharePoint digest through Microsoft 365 to EC2, which formats the digest and replies through SES.](images/workflows.png)
+![Manual opens an Outlook file, formats it in the browser and downloads a new file. In Server mode, Automatic sends a SharePoint digest through Microsoft 365 to EC2, which formats the digest and replies through SES.](images/workflows.png)
 
 ## Where the work happens
 
@@ -10,20 +10,20 @@ Digest Bot takes a SharePoint news digest and rebuilds it in the Staff News layo
 | --- | --- |
 | Browser | Opens the website, shows the group address on Automatic and formats files locally on Manual. |
 | Caddy on EC2 | Serves Service Desk Central, forwards web requests for Digest Bot and renews certificates. |
-| Node.js on EC2 | Serves the Digest Bot pages, receives SMTP mail, authenticates senders and runs the delivery worker. |
+| Node.js on EC2 | Serves the Digest Bot pages in both modes. In Server mode, it also receives SMTP mail, authenticates senders and runs the delivery worker. |
 | SQLite on EC2 | Keeps the automatic queue, message history and archives across container restarts. A separate file holds admin accounts and settings. |
-| Microsoft 365 and Amazon SES | Microsoft 365 delivers the incoming group copy. Amazon SES sends the formatted reply. |
+| Microsoft 365 and Amazon SES | Microsoft 365 receives the digest at the group address. In Server mode, EC2 formats the group copy and sends it through Amazon SES. |
 
 ## What happens to the email
 
-Both workflows read the message's *MIME parts*, which hold the subject, text, HTML and inline images. The formatter extracts the news links and article details, then builds a fresh message with the Staff News logo, layout and Brisbane-date subject.
+The browser and the Server worker read the message's *MIME parts*, which hold the subject, text, HTML and inline images. The formatter extracts the news links and article details, then builds a fresh message with the Staff News logo, layout and Brisbane-date subject.
 
 - In **Manual**, the source file stays in the browser. You preview and download the rebuilt `.eml`, then use **Forward** to address and send it in Outlook. The download has the Staff News From header and a blank To field.
-- In **Automatic**, SharePoint sends to the Microsoft 365 group and the group delivers an SMTP copy to the bot. The bot uses the email's authenticated From address as the destination and sends the rebuilt message from `digest@bond-sdc.com` through SES.
+- In **Automatic**, SharePoint sends to the Microsoft 365 group. In **Server** mode, the group delivers an SMTP copy to the bot. The bot uses the authenticated From address as the destination and sends the rebuilt message through SES. In **Other** mode, the site shows the same address and EC2 leaves delivery to the service handling mail for the group.
 
 [Shared formatter](../dist/core) · [Browser workflow](../dist/app.js) · [Automatic delivery worker](../server/delivery.js)
 
-## How automatic delivery decides what to do
+## How Server mode handles a digest
 
 ```mermaid
 flowchart TD

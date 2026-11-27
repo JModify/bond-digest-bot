@@ -7,7 +7,7 @@ Use one Ubuntu server in **Asia Pacific (Sydney)** (`ap-southeast-2`). Docker Co
 | `service-desk-central` | Caddy serves the static site, manages HTTPS and proxies the public Digest Bot site. | `https://bond-sdc.com` and `https://www.bond-sdc.com` |
 | `digest-bot` | Node.js serves the formatter. Visitors format and download `.eml` files in their own browser. | `https://digest.bond-sdc.com` |
 
-The default deployment uses ports `80` and `443` for web traffic. [Enable automatic digests on EC2](email-delivery.md) to add the fixed SMTP inbox, the Microsoft 365 group and SES replies.
+The default deployment uses **Other** processing with ports `80` and `443` for web traffic. Set `DIGEST_GROUP_ADDRESS` in `.env` to show the Microsoft 365 group on the public **Automatic** tab. [Enable Server processing](email-delivery.md) to add the fixed SMTP inbox and SES replies.
 
 ## 1. Launch the EC2 server
 
@@ -88,7 +88,7 @@ Open Service Desk Central and Digest Bot. Caddy may take a few minutes to obtain
 
 ## Update both sites
 
-These commands update the manual deployment. If you use automatic delivery, follow the [upgrade steps](email-delivery.md#2-update-the-digest-bot-checkout-and-env) and start with both Compose files. If you originally cloned the `docker-ec2` branches, switch both repositories to `main` before pulling.
+These commands update a deployment using **Other**. For **Server** processing, follow the [upgrade steps](email-delivery.md#2-update-the-digest-bot-checkout-and-env) and include `compose.delivery.yaml`. If the admin host updater is installed, use [Site updates](admin.md#manage-the-sites). If you originally cloned the `docker-ec2` branches, switch both repositories to `main` before pulling.
 
 ```bash
 cd ~/bond-sdc/bond-digest-bot

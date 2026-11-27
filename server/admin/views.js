@@ -3,6 +3,7 @@
 
 import { randomUUID } from "node:crypto";
 import { defaultCareersDay, weekdays } from "../careers.js";
+import { processingMethodLabels } from "../config.js";
 import { passwordHint } from "./accounts.js";
 import { adminPages, can, canManageRole, permissions } from "./permissions.js";
 
@@ -122,12 +123,12 @@ function table(headers, contents) {
 }
 
 export function mailPage(user, history, state, notice) {
-  const body = history
-    ? mailTable(history, state)
-    : "<p>Automatic email delivery is disabled. Start the mail-enabled Compose stack to access its history.</p>";
+  const description = history
+    ? "SMTP submissions and outgoing SES requests. Times are shown in Brisbane time."
+    : "Email History is available when Processing Method is set to Server.";
   return page(
     "Email History",
-    `<h1>Digest Bot Email History</h1><p class="lede">SMTP submissions and outgoing SES requests. Times are shown in Brisbane time.</p>${body}`,
+    `<h1>Digest Bot Email History</h1><p class="lede">${description}</p>${history ? mailTable(history, state) : ""}`,
     { user, current: "mail", notice },
   );
 }
@@ -211,6 +212,7 @@ export function systemPage(
   user,
   {
     pending,
+    processingMethod = pending === undefined ? "other" : "server",
     paused,
     careersDay = defaultCareersDay,
     activity = [],
@@ -225,22 +227,22 @@ export function systemPage(
   return page(
     "System",
     `<h1>System</h1>
-    ${digestPanel(user, pending, paused, careersDay)}
+    ${digestPanel(user, processingMethod, pending, paused, careersDay)}
     ${can(user, "site_updates") ? siteUpdatesPanel(update, updateAvailable) : ""}
-    ${can(user, "environment") ? environmentSettings(settings, updateAvailable, pending !== undefined) : ""}
+    ${can(user, "environment") ? environmentSettings(settings, updateAvailable, processingMethod) : ""}
     ${can(user, "reboot") ? rebootPanel(instanceId, settings?.SDC_ADMIN_EC2_INSTANCE_ID, runningUpdate, can(user, "site_updates") && updateAvailable) : ""}
     ${can(user, "activity") ? activityPanel(activity) : ""}`,
     { user, current: "system", notice },
   );
 }
 
-function digestPanel(user, pending, paused, careersDay) {
+function digestPanel(user, method, pending, paused, careersDay) {
   // The status and Careers controls have separate permissions, so either section can appear on its
   // own.
   const showStatus = can(user, "digest_status") || can(user, "freeze");
   const showSchedule = can(user, "careers_schedule");
   if (!showStatus && !showSchedule) return "";
-  const state = pending === undefined ? "Disabled" : paused ? "Frozen" : "Listening";
+  const state = paused ? "Frozen" : "Listening";
   const controls =
     pending !== undefined && can(user, "freeze")
       ? post(
@@ -251,14 +253,16 @@ function digestPanel(user, pending, paused, careersDay) {
       : "";
   return `<section class="panel">
     <div class="panel-heading"><h2>Digest Bot</h2>${controls}</div>
+    <p><strong>Processing Method</strong> ${processingMethodLabels[method]}</p>
     ${
-      showStatus
+      showStatus && pending !== undefined
         ? `<dl class="digest-metrics">
       <div><dt>State</dt><dd class="digest-state" data-state="${state.toLowerCase()}">${state}</dd></div>
-      <div><dt>Queued</dt><dd>${pending ?? 0}</dd></div>
+      <div><dt>Queued</dt><dd>${pending}</dd></div>
     </dl>`
         : ""
     }
+    ${method === "other" ? "<p>Automatic digests are handled outside this server.</p>" : ""}
     ${showSchedule ? careersSchedule(careersDay) : ""}
   </section>`;
 }
@@ -272,7 +276,7 @@ function careersSchedule(day) {
     .join("");
   const field = `<label>Include on<select name="weekday" aria-describedby="careers-schedule-hint" required>${options}</select></label>`;
   return `<div class="digest-schedule">
-    <div><h3>Careers at Bond</h3><p id="careers-schedule-hint">Appends the article to automatic Staff News emails on this day (Brisbane time).</p></div>
+    <div><h3>Careers at Bond</h3><p id="careers-schedule-hint">Appends the article to automatic Staff News emails in Server mode on this day (Brisbane time).</p></div>
     ${post("system/careers", field, submit("Save schedule"), "inline-form")}
   </div>`;
 }
@@ -323,21 +327,44 @@ function rebootPanel(instanceId, savedId, runningUpdate, updateAvailable) {
   return `<section class="panel"><h2>EC2 reboot</h2>${content}</section>`;
 }
 
-function environmentSettings(settings, available, automatic) {
+function environmentSettings(settings, available, activeMethod) {
+  const savedMethod = settings?.DIGEST_PROCESSING_METHOD;
+  // Older host updaters publish only the original environment fields.
+  const supportsMethod = Object.hasOwn(processingMethodLabels, savedMethod);
+  const methodOptions = Object.entries(processingMethodLabels)
+    .map(
+      ([key, label]) =>
+        `<option value="${key}"${key === savedMethod ? " selected" : ""}>${label}</option>`,
+    )
+    .join("");
+  const methodField = supportsMethod
+    ? `<label>Processing Method<select name="DIGEST_PROCESSING_METHOD" aria-describedby="processing-method-help" required>${methodOptions}</select></label>`
+    : "";
+  const methodHelp = supportsMethod
+    ? `<p id="processing-method-help">Server receives digests on EC2 and sends replies through Amazon SES. Other leaves automatic delivery to another service.</p>`
+    : settings
+      ? "<p>Update the EC2 host updater to edit Processing Method.</p>"
+      : "";
+  const pending =
+    supportsMethod && savedMethod !== activeMethod
+      ? `<p><strong>${processingMethodLabels[savedMethod]}</strong> is saved for the next rebuild.</p>`
+      : "";
   const fields = Object.entries(settingsFields)
     .map(([key, label]) => {
       const instance = key === "SDC_ADMIN_EC2_INSTANCE_ID";
-      const required = key === "ACME_EMAIL" || (key === "DIGEST_GROUP_ADDRESS" && automatic);
+      const required =
+        key === "ACME_EMAIL" ||
+        (key === "DIGEST_GROUP_ADDRESS" && !supportsMethod && activeMethod === "server");
       return `<label>${label}<input name="${key}" type="${instance ? "text" : "email"}" maxlength="${instance ? 19 : 254}" value="${esc(settings?.[key])}"${required ? " required" : ""}></label>`;
     })
     .join("");
   const editor =
     settings && available
       ? `<div class="settings-actions">
-    ${post("system/settings", fields, submit("Save .env"), "inline-form")}
+    ${post("system/settings", methodField + fields, submit("Save .env"), "inline-form")}
     ${post("system/refresh-settings", "", submit("Reload values from EC2", "secondary"))}</div>`
       : "<p>The host must finish its current request and provide the settings before you can edit them.</p>";
-  return `<section class="panel"><h2>Environment settings</h2><p>Save changes to the EC2 <code>.env</code> file, then rebuild the sites to apply them.</p>${editor}</section>`;
+  return `<section class="panel"><h2>Environment settings</h2><p>Save changes to the EC2 <code>.env</code> file, then rebuild the sites to apply them.</p>${methodHelp}${pending}${editor}</section>`;
 }
 
 const roleSelect = (roles, selected) =>
