@@ -621,6 +621,78 @@ test("protects maintenance and resends with roles, origin checks and revocable s
   );
 });
 
+test("saves a processing method for rebuild and disables mail history in Other mode", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "digest-processing-"));
+  const adminConfig = await provisionAdmin(dir);
+  const store = openStore(":memory:");
+  let settings = {
+    ACME_EMAIL: "admin@example.org",
+    DIGEST_GROUP_ADDRESS: config.groupAddress,
+    SDC_ADMIN_EC2_INSTANCE_ID: "",
+    DIGEST_PROCESSING_METHOD: "server",
+  };
+  const host = {
+    updateStatus: async () => ({ state: "ready", detail: "Ready" }),
+    readSettings: async () => settings,
+    async request({ kind, values }) {
+      assert.equal(kind, "settings");
+      settings = values;
+      return true;
+    },
+  };
+  let admin = await startAdmin(adminConfig, store, host);
+  t.after(async () => {
+    await admin?.close();
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const cookie = await admin.login("jlavagna", password);
+  assert.equal(
+    (
+      await admin.request("/admin/system/settings", {
+        cookie,
+        body: { ...settings, DIGEST_PROCESSING_METHOD: "invalid" },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await admin.request("/admin/system/settings", {
+        cookie,
+        body: { ...settings, DIGEST_PROCESSING_METHOD: "other" },
+      })
+    ).status,
+    303,
+  );
+  assert.equal(settings.DIGEST_PROCESSING_METHOD, "other");
+  const before = await (await admin.request("/admin/system", { cookie })).text();
+  assert.match(before, /Processing Method<\/strong> Server/);
+  assert.match(before, /<option value="other" selected>Other<\/option>/);
+  assert.match(before, /Other<\/strong> is saved/);
+  assert.match(before, /<dt>Queued<\/dt>/);
+
+  await admin.close();
+  admin = undefined;
+  admin = await startAdmin({ ...loadConfig(settings), admin: adminConfig.admin }, undefined, host);
+  const after = await (await admin.request("/admin/system", { cookie })).text();
+  assert.match(after, /Processing Method<\/strong> Other/);
+  assert.doesNotMatch(after, /is saved|<dt>Queued<\/dt>|\/admin\/system\/mail/);
+  const history = await (await admin.request("/admin/mail", { cookie })).text();
+  assert.match(history, /Email History is available when Processing Method is set to Server/);
+  assert.doesNotMatch(history, /<table/);
+  assert.equal((await admin.request("/admin/mail/1", { cookie })).status, 404);
+  assert.equal(
+    (
+      await admin.request("/admin/mail/1/resend", {
+        cookie,
+        body: { request: actionKey, recipient: "one@example.net" },
+      })
+    ).status,
+    409,
+  );
+});
+
 test("applies editable role permissions to pages, direct requests and active sessions", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "digest-delegated-roles-"));
   const adminConfig = await provisionAdmin(dir);

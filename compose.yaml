@@ -26,6 +26,8 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
+      DIGEST_PROCESSING_METHOD: ${DIGEST_PROCESSING_METHOD:-}
+      DIGEST_GROUP_ADDRESS: ${DIGEST_GROUP_ADDRESS:-}
       SDC_ADMIN_ENABLED: ${SDC_ADMIN_ENABLED:-false}
       SDC_ADMIN_DATABASE: /admin-data/admin.sqlite
       SDC_ADMIN_EC2_INSTANCE_ID: ${SDC_ADMIN_EC2_INSTANCE_ID:-}

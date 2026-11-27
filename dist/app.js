@@ -164,7 +164,7 @@ for (const type of ["dragover", "drop"]) {
   });
 }
 
-// Automatic only needs the Microsoft 365 group address. The mail itself travels through SMTP.
+// Automatic shows the Microsoft 365 group address independently of how mail is processed.
 async function loadGroupAddress() {
   if (groupAddress.value || addressRequest) return;
   automaticFeedback.textContent = "Loading the group address…";
@@ -172,7 +172,7 @@ async function loadGroupAddress() {
   try {
     const response = await addressRequest;
     if (response.status === 404) {
-      automaticFeedback.textContent = "Automatic delivery is not configured.";
+      automaticFeedback.textContent = "The Microsoft 365 group address is not configured.";
       return;
     }
     if (!response.ok) throw new Error("Unable to load the group address");

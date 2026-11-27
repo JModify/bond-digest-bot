@@ -2,10 +2,10 @@
 
 Digest Bot formats SharePoint news digests in the Bond Staff News layout with a Brisbane-date subject.
 
-- **Automatic.** Digest Bot opens on this tab. Copy the Microsoft 365 group address and use it in SharePoint’s **To** field. The group forwards the digest to the bot, and Amazon SES sends the formatted reply to the original sender.
+- **Automatic.** Digest Bot opens on this tab. Copy the Microsoft 365 group address and use it in SharePoint’s **To** field. Your configured mail service returns the formatted digest.
 - **Manual.** Send the digest to your inbox. In Outlook, choose **More actions → Save as** and drop the `.eml` into Digest Bot. Download the formatted file, open it in Outlook and choose **Forward**. The browser processes the file locally. The download sets the From header to `bondstaffnews@bond.edu.au` and leaves the recipient blank.
 
-Both tabs are public. Automatic replies use the original From address after a passing, domain-aligned DKIM or SPF check.
+Both tabs are public. **Processing Method** controls whether EC2 runs SMTP, the email queue and Amazon SES delivery. **Other** keeps the website available while another service handles the group’s digests.
 
 - [How Digest Bot works](docs/how-it-works.md) shows the two workflows and the automatic delivery flow.
 - [Code map](docs/code-map.md) shows which files work together and where to make common changes.
@@ -14,7 +14,7 @@ Both tabs are public. Automatic replies use the original From address after a pa
 
 ## Deploy and test
 
-Follow the [EC2 setup guide](deploy/EC2.md) to run Service Desk Central and Digest Bot with Docker Compose. See [Enable automatic digests on EC2](deploy/email-delivery.md) for the Microsoft 365 group, DNS, SES and upgrade steps. Automatic delivery is enabled by adding `compose.delivery.yaml` to the Compose command.
+Follow the [EC2 setup guide](deploy/EC2.md) to run Service Desk Central and Digest Bot with Docker Compose. Use the [Processing Method guide](deploy/admin.md#switch-the-processing-method) to switch between web-only and EC2 mail processing. See [Enable automatic digests on EC2](deploy/email-delivery.md) for the SMTP, DNS and SES setup that Server mode uses.
 
 The [Service Desk Central administration guide](deploy/admin.md) covers the private email history, resends and EC2 maintenance controls.
 

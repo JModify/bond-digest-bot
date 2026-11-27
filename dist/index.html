@@ -93,7 +93,7 @@
         </details>
       </div>
 
-      <!-- This view reads the group address from /api/email. SMTP handles the email itself. -->
+      <!-- This view reads the group address from /api/email in either processing mode. -->
       <section id="automatic-view" aria-labelledby="automatic-title">
         <div class="intro">
           <h1 id="automatic-title">Email a news digest</h1>
@@ -108,7 +108,7 @@
               <input type="text" id="group-address" readonly spellcheck="false">
               <button class="button button-primary" type="button" id="copy-address">Copy address</button>
             </div>
-            <p class="automatic-note">Digest Bot sends the formatted email back to your inbox.</p>
+            <p class="automatic-note">The formatted email is sent back to your inbox.</p>
             <p class="visually-hidden" id="copy-feedback" role="status"></p>
           </div>
         </div>

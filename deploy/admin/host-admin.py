@@ -13,7 +13,9 @@ import sys
 import tempfile
 
 STATE = Path("/var/lib/bond-sdc-admin")
-KEYS = ("ACME_EMAIL", "DIGEST_GROUP_ADDRESS", "SDC_ADMIN_EC2_INSTANCE_ID")
+BASE_ENV_KEYS = ("ACME_EMAIL", "DIGEST_GROUP_ADDRESS", "SDC_ADMIN_EC2_INSTANCE_ID")
+METHOD_KEY = "DIGEST_PROCESSING_METHOD"
+ENV_KEYS = (*BASE_ENV_KEYS, METHOD_KEY)
 EMAIL = re.compile(
     r"[a-z0-9_.+%\-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+",
     re.I | re.ASCII,
@@ -24,14 +26,15 @@ END = b"# END SERVICE DESK CENTRAL ADMIN SETTINGS\n"
 BLOCK = re.compile(
     rb"(?m)^"
     + re.escape(BEGIN)
-    + b"".join(key.encode() + rb"='[^'\r\n]*'\n" for key in KEYS)
+    + b"".join(key.encode() + rb"='[^'\r\n]*'\n" for key in BASE_ENV_KEYS)
+    + rb"(?:" + METHOD_KEY.encode() + rb"='[^'\r\n]*'\n)?"
     + re.escape(END)
     + rb"\Z"
 )
 
 
-class CheckoutError(ValueError):
-    """A checkout failure with a message safe to display in the admin panel."""
+class MaintenanceError(ValueError):
+    """A maintenance failure with a message safe to display in the admin panel."""
 
 
 def write_json(path, data):
@@ -74,14 +77,9 @@ def read_regular(path, limit, owner=None):
         return data, info
 
 
-def settings_valid(values, automatic):
-    if (
-        not isinstance(values, dict)
-        or values.keys() != set(KEYS)
-        or not all(isinstance(value, str) for value in values.values())
-    ):
-        return False
-    certificate, group, instance = (values[key] for key in KEYS)
+def settings_valid(values):
+    certificate, group, instance = (values[key] for key in BASE_ENV_KEYS)
+    automatic = values[METHOD_KEY] == "server"
     return (
         len(certificate) <= 254
         and bool(EMAIL.fullmatch(certificate))
@@ -95,12 +93,12 @@ def dotenv_candidate(existing, values):
     base = BLOCK.sub(b"", existing)
     if base and not base.endswith(b"\n"):
         base += b"\n"
-    overrides = b"".join(f"{key}='{values[key]}'\n".encode("ascii") for key in KEYS)
+    overrides = b"".join(f"{key}='{values[key]}'\n".encode("ascii") for key in ENV_KEYS)
     return base + BEGIN + overrides + END
 
 
 class Deployment:
-    """Resolve the paired checkouts and use the Compose files selected at install time."""
+    """Resolve the paired checkouts and select the Compose files for the saved method."""
 
     def __init__(self):
         self.root = Path(os.environ["BOND_SDC_DEPLOY_ROOT"])
@@ -108,12 +106,14 @@ class Deployment:
         self.central = self.root / "bond-service-desk-central"
         self.bot = self.root / "bond-digest-bot"
         self.dotenv = self.bot / ".env"
-        self.automatic = os.environ["BOND_SDC_COMPOSE_MODE"] == "automatic"
-        self.environment = {key: value for key, value in os.environ.items() if key not in KEYS}
+        # Keep the install-time mode as the fallback for existing .env files.
+        automatic = os.environ["BOND_SDC_COMPOSE_MODE"] == "automatic"
+        self.default_method = "server" if automatic else "other"
+        self.environment = {key: value for key, value in os.environ.items() if key not in ENV_KEYS}
 
     def projection(self, dotenv):
         # Let Compose interpret .env and export just the settings the panel is allowed to read.
-        service = {"image": "scratch", "environment": {key: "${" + key + ":-}" for key in KEYS}}
+        service = {"image": "scratch", "environment": {key: "${" + key + ":-}" for key in ENV_KEYS}}
         document = json.dumps({"services": {"settings": service}})
         command = [
             "docker",
@@ -137,16 +137,23 @@ class Deployment:
             check=True,
         )
         values = json.loads(result.stdout)["services"]["settings"]["environment"]
-        return {key: values.get(key) or "" for key in KEYS}
+        return {key: values.get(key) or "" for key in ENV_KEYS}
+
+    def processing_method(self, values):
+        method = values[METHOD_KEY] or self.default_method
+        if method not in ("server", "other"):
+            raise MaintenanceError("Set DIGEST_PROCESSING_METHOD to server or other in .env.")
+        return method
 
     def snapshot(self):
         values = self.projection(self.dotenv)
-        for key, pattern in zip(KEYS, (EMAIL, EMAIL, INSTANCE)):
+        values[METHOD_KEY] = self.processing_method(values)
+        for key, pattern in zip(BASE_ENV_KEYS, (EMAIL, EMAIL, INSTANCE)):
             if len(values[key]) > 254 or not pattern.fullmatch(values[key]):
                 values[key] = ""
         write_json(STATE / "status" / "settings.json", values)
 
-    def compose(self, *args, dotenv=None, timeout=900):
+    def compose(self, method, *args, dotenv=None, timeout=900):
         command = [
             "docker",
             "compose",
@@ -155,7 +162,7 @@ class Deployment:
             "-f",
             "compose.yaml",
         ]
-        if self.automatic:
+        if method == "server":
             command.extend(["-f", "compose.delivery.yaml"])
         command.extend(["-f", "compose.updater.yaml"])
         subprocess.run(
@@ -164,10 +171,19 @@ class Deployment:
 
     def save_settings(self, values):
         # Stage the new file, check its full Compose configuration and replace it only if still current.
-        if not settings_valid(values, self.automatic):
+        if (
+            not isinstance(values, dict)
+            or values.keys() not in (set(BASE_ENV_KEYS), set(ENV_KEYS))
+            or not all(isinstance(value, str) for value in values.values())
+        ):
             raise ValueError("Invalid environment settings")
         existing, info = read_regular(self.dotenv, 1024 * 1024)
-        self.projection(self.dotenv)
+        # Continue accepting forms from a running container built before Processing Method existed.
+        values = {**self.projection(self.dotenv), **values}
+        method = self.processing_method(values)
+        values[METHOD_KEY] = method
+        if not settings_valid(values):
+            raise MaintenanceError("Check the certificate email, digest group address and EC2 instance ID.")
         candidate = dotenv_candidate(existing, values)
         with tempfile.NamedTemporaryFile(dir=self.bot, prefix=".sdc-env-", delete=False) as out:
             staging = Path(out.name)
@@ -179,7 +195,7 @@ class Deployment:
                 os.fsync(out.fileno())
                 if self.projection(staging) != values:
                     raise ValueError("Compose did not read the requested values")
-                self.compose("config", "--quiet", dotenv=staging, timeout=30)
+                self.compose(method, "config", "--quiet", dotenv=staging, timeout=30)
                 current, current_info = read_regular(self.dotenv, 1024 * 1024)
                 if current != existing or current_info.st_ino != info.st_ino:
                     raise ValueError("The .env file changed while settings were being validated")
@@ -212,24 +228,24 @@ class Deployment:
         origin = self.git(path, "remote", "get-url", "origin", capture=True)
         expected = "https://github.com/JModify/" + path.name
         if origin not in {expected, expected + ".git"}:
-            raise CheckoutError(
+            raise MaintenanceError(
                 f"{path.name} uses an unexpected Git origin. Its origin must point to {expected}."
             )
         if self.git(path, "branch", "--show-current", capture=True) != "main":
-            raise CheckoutError(f"{path.name} must be on the main branch.")
+            raise MaintenanceError(f"{path.name} must be on the main branch.")
         if self.git(path, "status", "--porcelain", "--untracked-files=no", capture=True):
-            raise CheckoutError(
+            raise MaintenanceError(
                 f"{path.name} has local changes to tracked files. Run git status in that checkout on EC2."
             )
         self.git(path, "fetch", "--no-tags", "origin", "main")
         head = self.git(path, "rev-parse", "FETCH_HEAD", capture=True)
         if not re.fullmatch(r"[a-f0-9]{40}", head):
-            raise CheckoutError(f"Git did not return a valid commit for {path.name}.")
+            raise MaintenanceError(f"Git did not return a valid commit for {path.name}.")
         try:
             self.git(path, "merge-base", "--is-ancestor", "HEAD", head)
         except subprocess.CalledProcessError as error:
             if error.returncode == 1:
-                raise CheckoutError(
+                raise MaintenanceError(
                     f"{path.name} cannot fast-forward to the fetched main branch. Review its local commits on EC2."
                 ) from error
             raise
@@ -243,10 +259,12 @@ class Deployment:
             for repo, commit in commits:
                 self.git(repo, "merge", "--ff-only", commit)
         status("running", "Validating Compose and building both images.")
-        self.compose("config", "--quiet", timeout=30)
-        self.compose("build", "service-desk-central", "digest-bot", timeout=600)
+        method = self.processing_method(self.projection(self.dotenv))
+        self.compose(method, "config", "--quiet", timeout=30)
+        self.compose(method, "build", "service-desk-central", "digest-bot", timeout=600)
         status("running", "Restarting both services and waiting for health checks.")
         self.compose(
+            method,
             "up",
             "--detach",
             "--no-build",
@@ -281,7 +299,7 @@ def apply_request(request_path, deployment):
             status("succeeded", "Environment settings reloaded from EC2.")
         else:
             raise ValueError("Unknown maintenance action")
-    except CheckoutError as error:
+    except MaintenanceError as error:
         print(f"Maintenance request failed: {error}", file=sys.stderr)
         status("failed", str(error))
         return 1

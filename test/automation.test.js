@@ -289,9 +289,32 @@ test("manual export uses the Staff News sender and leaves the recipient blank", 
   }
 });
 
-test("the website exposes only the group address when automatic mode is configured", async (t) => {
+test("Other skips mail configuration even when the delivery overlay is present", () => {
+  const other = loadConfig({
+    DIGEST_EMAIL_DELIVERY_ENABLED: "true",
+    DIGEST_PROCESSING_METHOD: "other",
+    DIGEST_GROUP_ADDRESS: config.groupAddress,
+    DIGEST_INBOX_DOMAIN: "invalid",
+  });
+  assert.equal(other.processingMethod, "other");
+  assert.equal(other.emailDeliveryEnabled, false);
+  assert.equal(other.groupAddress, config.groupAddress);
+  assert.equal("databasePath" in other, false);
+  assert.equal("tlsKeyPath" in other, false);
+  assert.equal(config.processingMethod, "server");
+  assert.throws(
+    () => loadConfig({ DIGEST_PROCESSING_METHOD: "server" }),
+    /requires compose\.delivery\.yaml/,
+  );
+});
+
+test("the website shows the group address in both processing modes", async (t) => {
   const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  for (const current of [loadConfig({}), config]) {
+  const other = loadConfig({
+    DIGEST_PROCESSING_METHOD: "other",
+    DIGEST_GROUP_ADDRESS: config.groupAddress,
+  });
+  for (const current of [loadConfig({}), config, other]) {
     const web = createWebServer(current).listen(0, "127.0.0.1");
     await once(web, "listening");
     t.after(() => new Promise((resolve) => web.close(resolve)));
@@ -317,8 +340,8 @@ test("the website exposes only the group address when automatic mode is configur
     assert.equal(document.querySelector("header .home-link").href, "https://bond-sdc.com/");
     assert.equal((await fetch(base + "/healthz")).status, 200);
     const settings = await fetch(base + "/api/email");
-    if (current.emailDeliveryEnabled)
-      assert.deepEqual(await settings.json(), { groupAddress: config.groupAddress });
+    if (current.groupAddress)
+      assert.deepEqual(await settings.json(), { groupAddress: current.groupAddress });
     else assert.equal(settings.status, 404);
     assert.equal((await fetch(base + "/api/email/requests/" + "0".repeat(32))).status, 404);
     assert.equal((await fetch(base + "/api/email/requests", { method: "POST" })).status, 404);

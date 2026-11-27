@@ -3,6 +3,8 @@
 import { join } from "node:path";
 import { normaliseAddress } from "../dist/core/mailbox.js";
 
+export const processingMethodLabels = Object.freeze({ server: "Server", other: "Other" });
+
 const hostnamePattern = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
 const list = (value) =>
   (value ?? "")
@@ -41,14 +43,27 @@ export function loadConfig(env = process.env) {
   if (origin.protocol !== "https:" || origin.href !== origin.origin + "/") {
     throw new Error("DIGEST_PUBLIC_ORIGIN must be an HTTPS origin without a path.");
   }
-  const emailDeliveryEnabled = env.DIGEST_EMAIL_DELIVERY_ENABLED === "true";
-  const webConfig = { origin: origin.origin, emailDeliveryEnabled, admin: adminConfig(env) };
-  // A browser-only deployment can run without an SMTP certificate, a group address or AWS settings.
+  const mailConfigured = env.DIGEST_EMAIL_DELIVERY_ENABLED === "true";
+  // Existing deployments without a saved method still take their default from the Compose files.
+  const processingMethod = env.DIGEST_PROCESSING_METHOD || (mailConfigured ? "server" : "other");
+  if (!Object.hasOwn(processingMethodLabels, processingMethod)) {
+    throw new Error("DIGEST_PROCESSING_METHOD must be server or other.");
+  }
+  const emailDeliveryEnabled = processingMethod === "server";
+  if (emailDeliveryEnabled && !mailConfigured) {
+    throw new Error("Server processing requires compose.delivery.yaml.");
+  }
+  // The website can show the group address without opening the mail database or SMTP listener.
+  const groupAddress = normaliseAddress(env.DIGEST_GROUP_ADDRESS).toLowerCase();
+  const webConfig = {
+    origin: origin.origin,
+    processingMethod,
+    groupAddress,
+    emailDeliveryEnabled,
+    admin: adminConfig(env),
+  };
   if (!emailDeliveryEnabled) return webConfig;
 
-  // The group address is shown to users. The inbox address accepts SMTP traffic and the SES address
-  // sends the result.
-  const groupAddress = normaliseAddress(env.DIGEST_GROUP_ADDRESS).toLowerCase();
   if (!groupAddress)
     throw new Error("Set DIGEST_GROUP_ADDRESS to the Microsoft 365 group email address.");
   const inboxDomain = hostname(
@@ -64,7 +79,6 @@ export function loadConfig(env = process.env) {
   const tlsDir = env.DIGEST_TLS_DIR ?? "./var/smtp-tls";
   return {
     ...webConfig,
-    groupAddress,
     inboxAddress: "digest@" + inboxDomain,
     mailHost: hostname(env.DIGEST_MAIL_HOST ?? "mail.bond-sdc.com", "DIGEST_MAIL_HOST"),
     from,

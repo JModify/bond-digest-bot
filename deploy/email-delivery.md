@@ -1,6 +1,6 @@
 # Enable automatic digests on your existing EC2 server
 
-Digest Bot opens on the **Automatic** tab, which shows the Microsoft 365 group address. A user sends a SharePoint news digest to that group and receives the formatted version in their original inbox. The bot uses SQLite to track which messages it has processed. [Illustrated workflow](../docs/how-it-works.md)
+Use **Server** processing to receive group mail on EC2. Digest Bot opens on the **Automatic** tab, which shows the Microsoft 365 group address. A user sends a SharePoint news digest to that group and receives the formatted version in their original inbox. The bot uses SQLite to track which messages it has processed. [Illustrated workflow](../docs/how-it-works.md)
 
 | Address | Where to use it |
 | --- | --- |
@@ -30,9 +30,10 @@ git pull --ff-only origin main
 sudo nano .env
 ```
 
-Keep `ACME_EMAIL` and set `DIGEST_GROUP_ADDRESS` to the actual email of the group from Step 1. Clean up old `DIGEST_AUTH_USER`, `DIGEST_AUTH_HASH`, `DIGEST_ALLOWED_RECIPIENTS` and `DIGEST_ALLOWED_RECIPIENT_DOMAINS` entries if present.
+Keep `ACME_EMAIL`. Set `DIGEST_PROCESSING_METHOD=server` and set `DIGEST_GROUP_ADDRESS` to the email address from Step 1. If the admin updater has written a settings block at the end of `.env`, edit the values there. Clean up old `DIGEST_AUTH_USER`, `DIGEST_AUTH_HASH`, `DIGEST_ALLOWED_RECIPIENTS` and `DIGEST_ALLOWED_RECIPIENT_DOMAINS` entries if present.
 
 ```dotenv
+DIGEST_PROCESSING_METHOD=server
 DIGEST_GROUP_ADDRESS=your-digest-group@bond.edu.au
 ```
 
@@ -93,7 +94,7 @@ sudo docker compose -f compose.yaml -f compose.delivery.yaml logs --tail=80 dige
 
 | What you see | What to check |
 | --- | --- |
-| **Automatic delivery is not configured** | Start Compose with both files and check `DIGEST_GROUP_ADDRESS` in `.env`. |
+| **The Microsoft 365 group address is not configured** | Set `DIGEST_GROUP_ADDRESS` in `.env`, then recreate the Digest Bot container. |
 | Nothing reaches the group or bot | Ask Bond ITS to trace the message to the group and the external member. Check that the guest can receive the group’s mail, that `inbox.bond-sdc.com` has the right MX target, and that inbound TCP `25` is open. |
 | **Digest Bot could not authenticate the original sender** | Check the `Digest authentication rejected` log. It reports the From domain, SMTP envelope domain, DKIM selector results and SPF result. Inspect the final forwarded copy or ask Exchange administrators to trace it. |
 | DKIM `none` or `domain-mismatch` and SPF `domain-mismatch` | Ask the outbound email administrator to sign the guest copy for the original From domain. The SPF result is bound to the SMTP envelope domain. |
@@ -107,9 +108,9 @@ Accepted sends include time spent in the queue, formatting and the SES request, 
 
 The bot replies to the authenticated `From` address. It records the Message-ID or verified signature key for seven days to suppress repeat deliveries, and clears the source content when a job reaches a final state. [Microsoft DKIM documentation](https://learn.microsoft.com/en-us/defender-office-365/email-authentication-dkim-configure) · [Exchange message trace](https://learn.microsoft.com/en-us/exchange/monitoring/trace-an-email-message/message-trace-modern-eac)
 
-## Pause automatic delivery
+## Switch off EC2 mail processing
 
-Use the base Compose file to return to manual formatting while keeping the queue and certificates on disk.
+Use **Other** in [Processing Method](admin.md#switch-the-processing-method) from the admin panel. For a terminal-only deployment, set `DIGEST_PROCESSING_METHOD=other` in `.env` and recreate the services with the base Compose file. Keep `DIGEST_GROUP_ADDRESS` to display the group address on the website.
 
 ```bash
 sudo docker compose up -d --build --force-recreate --wait
